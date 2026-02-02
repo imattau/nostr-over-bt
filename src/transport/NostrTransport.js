@@ -39,10 +39,14 @@ export class NostrTransport extends ITransport {
 
     async publish(event) {
         try {
-            await Promise.any(this.pool.publish(this.relays, event));
+            const results = await Promise.allSettled(this.pool.publish(this.relays, event));
+            const fulfilled = results.filter(r => r.status === 'fulfilled');
+            if (fulfilled.length === 0) {
+                throw new Error("Relay rejected event");
+            }
             return event.id;
         } catch (err) {
-            throw new Error(`NostrTransport: Publish failed: ${err.message}`);
+            throw new Error(`NostrTransport: ${err.message}`);
         }
     }
 

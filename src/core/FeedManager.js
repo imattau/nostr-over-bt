@@ -109,7 +109,10 @@ export class FeedManager {
 
     async resolveFeedPointer(transportPubkey) {
         const dht = this.bt.getDHT();
-        if (!dht) throw new Error("DHT not available.");
+        if (!dht) {
+            // Silence warning if DHT is intentionally disabled (browsers)
+            return null;
+        }
 
         return new Promise((resolve, reject) => {
             const publicKeyBuffer = Buffer.from(transportPubkey, 'hex');

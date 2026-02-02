@@ -17,7 +17,11 @@ export class SeedingQueue {
     constructor(transportManager) {
         console.log(`[Queue] Initializing with concurrency: ${SEEDING_CONCURRENCY} (System CPUs: ${CPU_COUNT})`);
         this.manager = transportManager;
-// ...
+        this.queueName = 'nostr-bt-seeding';
+
+        // 1. Initialize the Queue
+        this.queue = new Queue(this.queueName, { connection });
+
         // 2. Initialize the Worker
         this.worker = new Worker(this.queueName, async (job) => {
             const event = job.data;

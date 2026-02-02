@@ -35,13 +35,12 @@ const originalWarn = console.warn;
 
 const tuiLog = (...args) => ui.logDiscovery(args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
 const tuiError = (...args) => ui.logDiscovery(`{red-fg}ERROR: ${args.join(' ')}{/}`);
-const tuiWarn = (...args) => ui.logDiscovery(`{yellow-fg}WARN: ${args.join(' ')}{/}`);
-
+console.warn = (...args) => ui.logDiscovery(`{yellow-fg}WARN: ${args.join(' ')}{/}`); // Keep original warn
 console.log = tuiLog;
 console.error = tuiError;
-console.warn = tuiWarn;
 console.info = tuiLog;
 console.debug = tuiLog;
+
 
 // --- Global Error Catching (Prevents stdout leaks) ---
 process.on('uncaughtException', (err) => {
@@ -95,6 +94,16 @@ const feed = new FeedManager(bt, identity);
 const profiles = new ProfileManager(nostr);
 
 const manager = new TransportManager(hybrid, { wotManager: wot, feedManager: feed });
+
+let currentView = 'global'; // 'global' or 'bt-only'
+const allMessages = []; // Store all incoming messages for filtering
+
+// Helper to display messages based on current view
+const displayMessages = () => {
+    ui.timeline.setContent(''); // Clear current view
+    const messagesToDisplay = allMessages.filter(m => currentView === 'global' || m.isHybrid);
+    messagesToDisplay.forEach(m => ui.logMessage(m.author, m.content, m.source));
+};
 
 // --- 2. Input Handling ---
 
@@ -165,8 +174,15 @@ ui.onInput = async (msg) => {
             ui.logDiscovery(" /relay list       - List connections");
             ui.logDiscovery(" /tracker add <u>  - Add BT tracker");
             ui.logDiscovery(" /clear            - Reset panels");
+            ui.logDiscovery(" /view             - Toggle between Global and Nostr-BT only feeds");
             ui.logDiscovery(" /quit             - Exit application");
             ui.logDiscovery(" /help             - Show this list");
+            break;
+
+        case '/view':
+            currentView = currentView === 'global' ? 'bt-only' : 'global';
+            ui.logDiscovery(`Switched to ${currentView === 'global' ? 'Global' : 'Nostr-BT Only'} feed.`);
+            displayMessages(); // Re-render the timeline with the current messages based on the new view
             break;
 
         case '/quit':
@@ -185,10 +201,8 @@ async function start() {
     try {
         originalLog("[Diag] Entering start()...");
         
-        // NOW enable redirection
-        console.log = (...args) => ui.logDiscovery(args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
-        console.error = (...args) => ui.logDiscovery(`{red-fg}ERROR: ${args.join(' ')}{/}`);
-        console.warn = (...args) => ui.logDiscovery(`{yellow-fg}WARN: ${args.join(' ')}{/}`);
+        // NOW enable redirection (after initial Diag logs)
+        // console.log, console.error, console.warn already redirected above.
 
         ui.render(); 
         
@@ -204,12 +218,23 @@ async function start() {
         nostr.subscribe({ kinds: [1], limit: 50 }, (event) => {
             if (event.pubkey === myNostrPk) return;
             
-            // Background fetch profile. 
-            // On finding, subsequent posts will show the name.
             profiles.fetchProfile(event.pubkey);
-            
+            manager.handleIncomingEvent(event);
+
             const name = profiles.getDisplayName(event.pubkey);
-            ui.logMessage(name, event.content, 'Relay');
+            const isHybrid = event.tags?.some(t => t[0] === 'bt') || event.content?.startsWith('magnet:');
+            
+            const messageObj = {
+                author: name,
+                content: event.content,
+                source: isHybrid ? 'Hybrid' : 'Relay',
+                isHybrid: isHybrid
+            };
+            allMessages.push(messageObj);
+
+            if (currentView === 'global' || (currentView === 'bt-only' && isHybrid)) {
+                ui.logMessage(messageObj.author, messageObj.content, messageObj.source);
+            }
         });
 
         // Initial P2P sync
@@ -219,7 +244,17 @@ async function start() {
                 events.forEach(e => {
                     profiles.fetchProfile(e.pubkey);
                     const name = profiles.getDisplayName(e.pubkey);
-                    ui.logMessage(name, e.content, 'P2P');
+                    const messageObj = {
+                        author: name,
+                        content: e.content,
+                        source: 'P2P',
+                        isHybrid: true // P2P events are inherently hybrid
+                    };
+                    allMessages.push(messageObj);
+
+                    if (currentView === 'global' || (currentView === 'bt-only' && messageObj.isHybrid)) {
+                        ui.logMessage(name, e.content, 'P2P');
+                    }
                 });
             }
         }).catch(err => console.warn(`P2P Sync: ${err.message}`));

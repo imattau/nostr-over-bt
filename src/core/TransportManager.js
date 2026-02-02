@@ -66,14 +66,15 @@ export class TransportManager {
      * This allows a client to "Sync Follows" without a relay.
      * 
      * @param {string} transportPubkey - The target user's P2P address.
+     * @param {string} [nostrPubkey] - Optional Nostr identity to help resolve magnet via Relay Bridge.
      * @returns {Promise<void>}
      */
-    async bootstrapWoTP2P(transportPubkey) {
+    async bootstrapWoTP2P(transportPubkey, nostrPubkey = null) {
         if (!this.wotManager) throw new Error("WoTManager not initialized.");
         
         console.log(`TransportManager: Bootstrapping WoT from P2P address ${transportPubkey}...`);
         
-        const events = await this.subscribeP2P(transportPubkey);
+        const events = await this.subscribeP2P(transportPubkey, nostrPubkey);
         
         // Find latest Kind 3 (Contact List) in the P2P feed
         const contactList = events.find(e => e.kind === 3);
@@ -227,8 +228,8 @@ export class TransportManager {
         try {
             relayStatus = await this.transport.nostr.publish(signedEvent);
         } catch (error) {
-            console.error("TransportManager: Relay publish failed. Aborting seed.", error);
-            throw new Error("Relay publish failed. Seeding aborted.");
+            console.warn("TransportManager: Relay publish failed, but proceeding with P2P seeding.", error.message);
+            relayStatus = 'partial_fail';
         }
 
         const eventBuffer = this.packager.package(signedEvent);

@@ -24,6 +24,11 @@ The goal of this library is to solve the two biggest scaling challenges in the N
 npm install nostr-over-bt
 ```
 
+## 📖 Documentation
+
+*   [API Reference](docs/API.md): Detailed documentation of all classes and methods.
+*   [P2P Discovery](docs/P2P_DISCOVERY.md): Deep dive into the DHT-based discovery protocol.
+
 ## 🛠 Quick Start (Client)
 
 ```javascript

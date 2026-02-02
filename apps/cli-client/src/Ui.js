@@ -51,14 +51,23 @@ export class TerminalUi {
     setupKeys() {
         this.screen.key(['escape', 'C-c'], () => process.exit(0));
 
-        this.input.key('tab', () => {
-            const val = this.input.getValue();
-            if (val.startsWith('/')) {
-                const match = this.commands.find(c => c.startsWith(val));
-                if (match) {
-                    this.input.setValue(match + ' ');
-                    this.screen.render();
+        // Use a more robust key listener for the screen to catch Tab
+        this.screen.on('keypress', (ch, key) => {
+            if (key.name === 'tab' && this.input.focused) {
+                const val = this.input.getValue();
+                if (val.startsWith('/')) {
+                    // Find the next matching command (basic cycling)
+                    const matches = this.commands.filter(c => c.startsWith(val.trim()));
+                    if (matches.length > 0) {
+                        // For now, just take the first match or cycle if already a match
+                        const currentMatchIndex = matches.indexOf(val.trim());
+                        const nextMatch = matches[(currentMatchIndex + 1) % matches.length];
+                        
+                        this.input.setValue(nextMatch + ' ');
+                        this.screen.render();
+                    }
                 }
+                return false; // Prevent default focus switch
             }
         });
 

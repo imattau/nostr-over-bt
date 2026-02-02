@@ -48,12 +48,18 @@ if (process.env.PRIVATE_KEY) {
 }
 
 const myNostrPk = getPublicKey(privateKey);
-const identity = IdentityManager.fromNostrSecretKey(privateKeyHex);
-originalLog("[Diag] Identity created.");
+const DEFAULT_RELAYS = [
+    'ws://localhost:8080',
+    'wss://relay.damus.io',
+    'wss://nos.lol',
+    'wss://relay.snort.social'
+];
 
-originalLog("[Diag] Initializing transport components...");
+const identity = IdentityManager.fromNostrSecretKey(privateKeyHex);
+
 const bt = new BitTorrentTransport({ dht: true, announce: ['ws://localhost:8081'] });
-const nostr = new NostrTransport([process.env.RELAY_URL || 'ws://localhost:8080']);
+const relays = process.env.RELAY_URL ? [process.env.RELAY_URL] : DEFAULT_RELAYS;
+const nostr = new NostrTransport(relays);
 const hybrid = new HybridTransport(nostr, bt);
 const wot = new WoTManager(nostr);
 const feed = new FeedManager(bt, identity);

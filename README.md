@@ -1,3 +1,5 @@
+![Nostr-over-BT Header](nostr-bt-header.png)
+
 # ⚡️ Nostr-over-BT
 
 **nostr-over-bt** is a high-performance Node.js library that bridges the [Nostr](https://github.com/nostr-protocol/nostr) protocol with the [BitTorrent](https://en.wikipedia.org/wiki/BitTorrent) network. It enables a hybrid transport layer where standard Nostr metadata lives on relays, while heavy content and long-term event storage are offloaded to a decentralized P2P swarm.

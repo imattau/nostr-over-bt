@@ -1,0 +1,35 @@
+{
+  "name": "nostr-over-bt",
+  "version": "1.0.0",
+  "description": "Nostr over bittorrent library",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imattau/nostr-over-bt.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/imattau/nostr-over-bt/issues"
+  },
+  "homepage": "https://github.com/imattau/nostr-over-bt#readme",
+  "dependencies": {
+    "bittorrent-dht": "^11.0.11",
+    "bittorrent-tracker": "^11.2.2",
+    "ed25519-supercop": "^2.0.1",
+    "nostr-tools": "^2.22.1",
+    "webtorrent": "^2.8.5",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "eslint": "^9.39.2",
+    "globals": "^17.3.0",
+    "jest": "^30.2.0"
+  }
+}

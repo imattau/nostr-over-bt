@@ -12,9 +12,9 @@ export class TerminalUi {
             style: { border: { fg: 'cyan' } }
         });
 
-        // 2. Swarm Map (The Stretch!)
+        // 2. Swarm Map
         this.map = this.grid.set(0, 6, 4, 6, contrib.map, {
-            label: ' 🌍 Global Swarm (P2P Discovery) '
+            label: ' 🌍 Global Swarm '
         });
 
         // 3. Search & Trends
@@ -38,16 +38,12 @@ export class TerminalUi {
 
         // 6. Command Input
         this.input = this.grid.set(10, 0, 2, 12, blessed.textbox, {
-            label: ' ⌨️ COMMANDS: /new <msg> | /search <query> | /follow <pk> | /help ',
+            label: ' ⌨️ COMMANDS: /new <msg> | /follow <pk> | /help ',
             border: { type: 'line' }, style: { border: { fg: 'white' } },
             inputOnFocus: true
         });
 
-        this.commands = [
-            '/new', '/search', '/follow', '/clear', '/help', '/quit', 
-            '/relay add', '/relay list', '/relay remove',
-            '/tracker add', '/tracker list'
-        ];
+        this.commands = ['/new', '/search', '/follow', '/clear', '/help', '/quit', '/relay add', '/relay list', '/tracker add'];
         this.speedHistory = new Array(60).fill(0);
         this.setupKeys();
     }
@@ -55,7 +51,6 @@ export class TerminalUi {
     setupKeys() {
         this.screen.key(['escape', 'C-c'], () => process.exit(0));
 
-        // Tab for Auto-completion
         this.input.key('tab', () => {
             const val = this.input.getValue();
             if (val.startsWith('/')) {
@@ -67,7 +62,6 @@ export class TerminalUi {
             }
         });
 
-        // Use 'submit' event which is standard for textboxes
         this.input.on('submit', (val) => {
             if (val && val.trim().length > 0) {
                 this.onInput(val);
@@ -89,22 +83,15 @@ export class TerminalUi {
     }
 
     updateNetwork(speedKB = 0, peers = 0, dhtNodes = 0) {
-        // Update Sparkline
         this.speedHistory.shift();
         this.speedHistory.push(speedKB || 0);
         this.sparkline.setData(['Download'], [this.speedHistory]);
 
-        // Update Stats Table
         this.swarmStats.setData({
             headers: ['Metric', 'Val'],
-            data: [
-                ['Peers', (peers || 0).toString()], 
-                ['DHT', (dhtNodes || 0).toString()], 
-                ['KB/s', (speedKB || 0).toString()]
-            ]
+            data: [['Peers', (peers || 0).toString()], ['DHT', (dhtNodes || 0).toString()], ['KB/s', (speedKB || 0).toString()]]
         });
 
-        // Randomly "Discover" peers on map for visual effect if peers exist
         if (peers > 0 && Math.random() > 0.7) {
             const lon = Math.floor(Math.random() * 360) - 180;
             const lat = Math.floor(Math.random() * 180) - 90;

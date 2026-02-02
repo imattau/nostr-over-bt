@@ -15,11 +15,14 @@ import { TerminalUi } from './Ui.js';
 const ui = new TerminalUi();
 
 // --- Redirect Console to TUI ---
-console.log = (...args) => ui.logDiscovery(args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
-console.error = (...args) => ui.logDiscovery(`{red-fg}ERROR: ${args.join(' ')}{/}`);
-console.warn = (...args) => ui.logDiscovery(`{yellow-fg}WARN: ${args.join(' ')}{/}`);
+const originalLog = console.log;
+const originalError = console.error;
+
+// console.log = (...args) => ui.logDiscovery(args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
+// ... (I will re-enable this INSIDE start())
 
 // --- 1. Initialize Identity ---
+originalLog("[Diag] Starting identity initialization...");
 let privateKey;
 let privateKeyHex;
 
@@ -29,8 +32,9 @@ if (process.env.PRIVATE_KEY) {
         try {
             const { data } = nip19.decode(keyData);
             privateKeyHex = data;
+            originalLog("[Diag] nsec decoded successfully.");
         } catch (e) {
-            console.error("Invalid nsec provided in .env");
+            originalError("CRITICAL: Invalid nsec provided in .env:", e.message);
             process.exit(1);
         }
     } else {
@@ -40,11 +44,14 @@ if (process.env.PRIVATE_KEY) {
 } else {
     privateKey = generateSecretKey();
     privateKeyHex = Buffer.from(privateKey).toString('hex');
+    originalLog("[Diag] Generated random identity.");
 }
 
 const myNostrPk = getPublicKey(privateKey);
 const identity = IdentityManager.fromNostrSecretKey(privateKeyHex);
+originalLog("[Diag] Identity created.");
 
+originalLog("[Diag] Initializing transport components...");
 const bt = new BitTorrentTransport({ dht: true, announce: ['ws://localhost:8081'] });
 const nostr = new NostrTransport([process.env.RELAY_URL || 'ws://localhost:8080']);
 const hybrid = new HybridTransport(nostr, bt);
@@ -52,6 +59,7 @@ const wot = new WoTManager(nostr);
 const feed = new FeedManager(bt, identity);
 
 const manager = new TransportManager(hybrid, { wotManager: wot, feedManager: feed });
+originalLog("[Diag] Transport manager ready.");
 
 // --- 2. Input Handling ---
 
@@ -82,8 +90,7 @@ ui.onInput = async (msg) => {
 
         case '/follow':
             ui.logDiscovery(`Mapping P2P path for: ${val.substring(0,8)}...`);
-            await manager.bootstrapWoTP2P(val);
-            ui.logDiscovery(`Graph Expanded via DHT.`);
+            await manager.bootstrapWoTP2P(val).catch(e => ui.logDiscovery(`{red-fg}Follow error: ${e.message}{/}`));
             break;
 
         case '/search':
@@ -127,7 +134,7 @@ ui.onInput = async (msg) => {
             break;
 
         case '/quit':
-            await hybrid.disconnect();
+            await hybrid.disconnect().catch(() => {});
             process.exit(0);
             break;
 
@@ -139,21 +146,41 @@ ui.onInput = async (msg) => {
 // --- 3. Telemetry Loop ---
 
 async function start() {
-    ui.logDiscovery(`Nostr Identity: ${myNostrPk.substring(0,8)}...`);
-    ui.logDiscovery(`P2P Address: ${identity.getPublicKey().substring(0,16)}...`);
-    if (!process.env.PRIVATE_KEY) ui.logDiscovery("Notice: Using temporary random identity.");
-    
-    await hybrid.connect();
+    try {
+        originalLog("[Diag] Entering start()...");
+        
+        // NOW enable redirection
+        console.log = (...args) => ui.logDiscovery(args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
+        console.error = (...args) => ui.logDiscovery(`{red-fg}ERROR: ${args.join(' ')}{/}`);
+        console.warn = (...args) => ui.logDiscovery(`{yellow-fg}WARN: ${args.join(' ')}{/}`);
 
-    setInterval(() => {
-        const dht = bt.getDHT();
-        const peers = bt.client.torrents.reduce((acc, t) => acc + (t.numPeers || 0), 0);
-        const nodes = dht ? (dht.nodes ? dht.nodes.length : 0) : 0;
-        const speed = Math.round((bt.client.downloadSpeed || 0) / 1024);
-        ui.updateNetwork(speed, peers, nodes);
-    }, 1000);
+        ui.render(); 
+        
+        ui.logDiscovery(`Nostr Identity: ${myNostrPk.substring(0,8)}...`);
+        ui.logDiscovery(`P2P Address: ${identity.getPublicKey().substring(0,16)}...`);
+        
+        ui.logDiscovery(`DHT Status: Connecting...`);
+        
+        await hybrid.connect();
+        ui.logDiscovery(`Network: Online.`);
 
-    ui.render();
+        // Initial P2P sync
+        manager.subscribeFollowsP2P().then(events => {
+            events.forEach(e => ui.logMessage(e.pubkey, e.content, 'P2P'));
+        }).catch(err => ui.logDiscovery(`{yellow-fg}P2P Sync Warning: ${err.message}{/}`));
+
+        setInterval(() => {
+            const dht = bt.getDHT();
+            const peers = bt.client.torrents.reduce((acc, t) => acc + (t.numPeers || 0), 0);
+            const nodes = dht ? (dht.nodes ? dht.nodes.length : 0) : 0;
+            const speed = Math.round((bt.client.downloadSpeed || 0) / 1024);
+            ui.updateNetwork(speed, peers, nodes);
+        }, 1000);
+
+    } catch (err) {
+        originalError("Startup Critical Error:", err);
+        process.exit(1);
+    }
 }
 
-start().catch(console.error);
+start();

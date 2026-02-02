@@ -1,23 +1,44 @@
 {
   "name": "nostr-over-bt",
   "version": "1.0.0",
-  "description": "Nostr over bittorrent library",
+  "description": "High-performance hybrid transport layer for Nostr using BitTorrent for heavy content and DHT for decentralized discovery.",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "lint": "eslint src/",
+    "bench": "node examples/relay-server/benchmark.js",
+    "bench:realistic": "node examples/relay-server/realistic-benchmark.js"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/imattau/nostr-over-bt.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "nostr",
+    "bittorrent",
+    "p2p",
+    "dht",
+    "decentralized",
+    "relay",
+    "swarm",
+    "webtorrent"
+  ],
+  "author": "imattau",
+  "license": "LGPL-2.1",
   "bugs": {
     "url": "https://github.com/imattau/nostr-over-bt/issues"
   },
   "homepage": "https://github.com/imattau/nostr-over-bt#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "src",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
   "dependencies": {
     "bittorrent-dht": "^11.0.11",
     "bittorrent-tracker": "^11.2.2",

@@ -1,0 +1,19 @@
+{
+  "name": "nostr-bt-relay",
+  "version": "1.0.0",
+  "description": "Production-grade Nostr relay with integrated BitTorrent archiving.",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --experimental-vm-modules ../../node_modules/jest/bin/jest.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "bullmq": "^5.67.2",
+    "dotenv": "^16.6.1",
+    "ioredis": "^5.9.2",
+    "nostr-over-bt": "file:../..",
+    "ws": "^8.19.0"
+  }
+}

@@ -1,0 +1,23 @@
+services:
+  relay:
+    build: 
+      context: ../../
+      dockerfile: apps/relay/Dockerfile
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DB_PATH=/data/relay.db
+    volumes:
+      - relay-data:/data
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  relay-data:

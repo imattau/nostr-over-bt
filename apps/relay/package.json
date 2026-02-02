@@ -14,6 +14,7 @@
     "dotenv": "^16.6.1",
     "ioredis": "^5.9.2",
     "nostr-over-bt": "file:../..",
+    "nostr-tools": "^2.22.1",
     "ws": "^8.19.0"
   }
 }

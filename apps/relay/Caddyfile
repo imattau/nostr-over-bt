@@ -1,0 +1,25 @@
+{
+    # Optional: Global options
+    email your-email@example.com
+}
+
+relay.yourdomain.com {
+    # 1. Reverse Proxy to the Relay
+    reverse_proxy relay:8080 {
+        # WebSocket headers are handled automatically by Caddy
+        # But we ensure they are passed correctly
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+    }
+
+    # 2. BT Tracker (Optional: if you want tracker on same domain)
+    # handle_path /tracker* {
+    #     reverse_proxy relay:8081
+    # }
+
+    # 3. Compression and Logging
+    encode gzip
+    log {
+        output file /data/access.log
+    }
+}

@@ -2,6 +2,7 @@ import 'dotenv/config';
 import http from 'http';
 import { WebSocketServer } from 'ws';
 import { Server as TrackerServer } from 'bittorrent-tracker';
+import { nip19 } from 'nostr-tools';
 import { 
     TransportManager, 
     HybridTransport, 
@@ -21,6 +22,25 @@ const TRACKER_PORT = process.env.TRACKER_PORT || 8081;
 
 const db = new RelayDatabase(DB_PATH);
 
+// --- Whitelist Setup ---
+const ALLOWED_PUBKEYS = new Set();
+if (process.env.ALLOWED_PUBKEYS) {
+    process.env.ALLOWED_PUBKEYS.split(',').forEach(key => {
+        const trimmed = key.trim();
+        if (trimmed.startsWith('npub1')) {
+            try {
+                const { data } = nip19.decode(trimmed);
+                ALLOWED_PUBKEYS.add(data);
+            } catch (e) {
+                console.error(`[Relay] Invalid npub in whitelist: ${trimmed}`);
+            }
+        } else {
+            ALLOWED_PUBKEYS.add(trimmed); // Assume hex
+        }
+    });
+    console.log(`[Relay] Private Mode: Active (${ALLOWED_PUBKEYS.size} pubkeys allowed)`);
+}
+
 // --- NIP-11 Information Document ---
 const relayInfo = {
     name: process.env.RELAY_NAME || "Nostr-BT Relay",
@@ -31,10 +51,8 @@ const relayInfo = {
     software: "https://github.com/imattau/nostr-over-bt",
     version: "1.0.0",
     limitation: {
-        search_config: {
-            is_enabled: true,
-            min_prefix: 3
-        }
+        search_config: { is_enabled: true, min_prefix: 3 },
+        payment_required: ALLOWED_PUBKEYS.size > 0 // Signal restriction
     }
 };
 
@@ -45,11 +63,9 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify(relayInfo));
         return;
     }
-    res.writeHead(404);
-    res.end();
+    res.writeHead(404).end();
 });
 
-// --- WebSocket Setup ---
 const wss = new WebSocketServer({ server });
 
 // --- BT Setup ---
@@ -75,6 +91,13 @@ wss.on('connection', (ws) => {
             switch (type) {
                 case 'EVENT': {
                     const event = payload[0];
+
+                    // Private Mode Restriction
+                    if (ALLOWED_PUBKEYS.size > 0 && !ALLOWED_PUBKEYS.has(event.pubkey)) {
+                        ws.send(JSON.stringify(['OK', event.id, false, 'restricted: pubkey not in whitelist']));
+                        return;
+                    }
+
                     const result = db.saveEvent(event);
                     ws.send(JSON.stringify(['OK', event.id, true, '']));
                     if (result.changes > 0) {
@@ -91,7 +114,7 @@ wss.on('connection', (ws) => {
                         const results = db.queryEvents(f);
                         results.forEach(e => ws.send(JSON.stringify(['EVENT', subId, e])));
                     });
-                    ws.send(JSON.stringify(['EOSE', subId])); // NIP-15
+                    ws.send(JSON.stringify(['EOSE', subId]));
                     break;
                 }
                 case 'CLOSE':
@@ -107,8 +130,6 @@ wss.on('connection', (ws) => {
 });
 
 function broadcast(event) {
-    // In a production relay, we should check filters for each client.
-    // For this reference, we broadcast to all active connections.
     wss.clients.forEach(client => {
         if (client.readyState === 1) {
             client.send(JSON.stringify(['EVENT', 'subscription', event]));
@@ -118,7 +139,6 @@ function broadcast(event) {
 
 server.listen(PORT, () => {
     console.log(`[Relay] Production Relay listening on http/ws localhost:${PORT}`);
-    if (ENABLE_BT) console.log(`[Relay] BT Tracker listening on port ${TRACKER_PORT}`);
 });
 
 process.on('SIGINT', async () => {

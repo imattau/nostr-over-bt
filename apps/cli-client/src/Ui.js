@@ -17,14 +17,14 @@ export class TerminalUi {
             label: ' 🌍 Global Swarm '
         });
 
-        // 3. Search & Trends
-        this.searchPanel = this.grid.set(4, 6, 4, 6, blessed.log, {
+        // 3. Search & Trends (Moved to bottom horizontal)
+        this.searchPanel = this.grid.set(8, 0, 2, 9, blessed.log, {
             label: ' 🔍 Discovery & Search ', tags: true, border: { type: 'line' },
             style: { border: { fg: 'magenta' } }
         });
 
-        // 4. Download Speed Sparkline
-        this.sparkline = this.grid.set(8, 0, 2, 9, contrib.sparkline, {
+        // 4. Download Speed Sparkline (Moved to right middle)
+        this.sparkline = this.grid.set(4, 6, 4, 6, contrib.sparkline, {
             label: ' ⚡ Network Throughput (KB/s) ',
             tags: true, border: { type: 'line' },
             lineColor: 'green'

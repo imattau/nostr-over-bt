@@ -45,10 +45,13 @@ export class IdentityManager {
      * @param {Buffer|string} secretKey 
      */
     load(secretKey) {
-        this.seed = typeof secretKey === 'string' ? Buffer.from(secretKey, 'hex') : secretKey;
+        if (typeof secretKey === 'string') {
+            this.seed = Buffer.from(secretKey, 'hex');
+        } else {
+            this.seed = Buffer.from(secretKey); // Handles Uint8Array or Buffer
+        }
+
         if (this.seed.length !== 32) {
-            // If it's 64 bytes, it might be the full secretKey from supercop.
-            // We take the first 32 as seed.
             this.seed = this.seed.slice(0, 32);
         }
         this.keypair = ed25519.createKeyPair(this.seed);

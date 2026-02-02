@@ -1,9 +1,9 @@
 services:
   relay:
-    image: ghcr.io/imattau/nostr-over-bt-relay:master
-    # build: 
-    #   context: ../../
-    #   dockerfile: apps/relay/Dockerfile
+    build: 
+      context: ../../
+      dockerfile: apps/relay/Dockerfile
+    # image: ghcr.io/imattau/nostr-over-bt-relay:master
     ports:
       - "127.0.0.1:8090:8080" # Relay WebSocket
       - "127.0.0.1:8091:8081" # BT Tracker (Optional)

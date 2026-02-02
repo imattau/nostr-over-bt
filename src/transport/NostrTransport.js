@@ -18,8 +18,20 @@ export class NostrTransport extends ITransport {
         // this.pool.close(this.relays);
     }
 
+    addRelay(url) {
+        if (!this.relays.includes(url)) {
+            this.relays.push(url);
+            console.log(`NostrTransport: Added relay ${url}`);
+        }
+    }
+
+    removeRelay(url) {
+        this.relays = this.relays.filter(r => r !== url);
+        console.log(`NostrTransport: Removed relay ${url}`);
+    }
+
     async publish(event) {
-        console.log("NostrTransport: Publishing event", event);
+        // console.log("NostrTransport: Publishing event", event);
         return "mock-relay-id";
     }
 

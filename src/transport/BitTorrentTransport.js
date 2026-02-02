@@ -31,6 +31,15 @@ export class BitTorrentTransport extends ITransport {
         });
     }
 
+    addTracker(url) {
+        if (!this.announce.includes(url)) {
+            this.announce.push(url);
+            console.log(`BitTorrentTransport: Added tracker ${url}`);
+            // Note: For existing torrents, we'd need to call announce on them
+            this.client.torrents.forEach(t => t.announce([url]));
+        }
+    }
+
     /**
      * Seeds data via BitTorrent.
      * @param {object} data - { buffer, filename }
@@ -46,7 +55,7 @@ export class BitTorrentTransport extends ITransport {
             }
 
             this.client.seed(buffer, opts, (torrent) => {
-                console.log(`BitTorrentTransport: Seeding ${filename}. Magnet: ${torrent.magnetURI}`);
+                // console.log(`BitTorrentTransport: Seeding ${filename}. Magnet: ${torrent.magnetURI}`);
                 resolve(torrent.magnetURI);
             });
 

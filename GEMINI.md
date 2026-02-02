@@ -22,6 +22,8 @@
 ## Key Files
 *   `PROJECT_PLAN.md`: Comprehensive project plan, timeline, and deliverables.
 *   `docs/P2P_DISCOVERY.md`: Architectural design for fully decentralized event discovery via DHT (BEP-44).
+*   `nostr-bt-header.png`: Brand header image for documentation and apps.
+*   `nostr-bt.png`: Project logo.
 *   `package.json`: Node.js project configuration and dependencies.
 *   `src/index.js`: Main entry point for the library.
 *   `README.md`: Contains the project title and a brief description ("Nostr over bittorrent library").

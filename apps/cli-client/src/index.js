@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import WebSocket from 'ws';
 import * as nip19 from 'nostr-tools/nip19';
 import { getPublicKey, finalizeEvent, generateSecretKey } from 'nostr-tools/pure';
 import { 
@@ -12,17 +13,26 @@ import {
 } from 'nostr-over-bt';
 import { TerminalUi } from './Ui.js';
 
+// --- Fix for Node.js WebSocket support ---
+global.WebSocket = class extends WebSocket {
+    constructor(address, protocols, options) {
+        super(address, protocols, {
+            ...options,
+            headers: {
+                'User-Agent': 'nostr-over-bt-cli/1.0.0'
+            }
+        });
+    }
+};
+
 const ui = new TerminalUi();
 
 // --- Redirect Console to TUI ---
 const originalLog = console.log;
 const originalError = console.error;
-
-// console.log = (...args) => ui.logDiscovery(args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
-// ... (I will re-enable this INSIDE start())
+const originalWarn = console.warn;
 
 // --- 1. Initialize Identity ---
-originalLog("[Diag] Starting identity initialization...");
 let privateKey;
 let privateKeyHex;
 
@@ -32,7 +42,6 @@ if (process.env.PRIVATE_KEY) {
         try {
             const { data } = nip19.decode(keyData);
             privateKeyHex = data;
-            originalLog("[Diag] nsec decoded successfully.");
         } catch (e) {
             originalError("CRITICAL: Invalid nsec provided in .env:", e.message);
             process.exit(1);
@@ -44,7 +53,6 @@ if (process.env.PRIVATE_KEY) {
 } else {
     privateKey = generateSecretKey();
     privateKeyHex = Buffer.from(privateKey).toString('hex');
-    originalLog("[Diag] Generated random identity.");
 }
 
 const myNostrPk = getPublicKey(privateKey);
@@ -65,7 +73,6 @@ const wot = new WoTManager(nostr);
 const feed = new FeedManager(bt, identity);
 
 const manager = new TransportManager(hybrid, { wotManager: wot, feedManager: feed });
-originalLog("[Diag] Transport manager ready.");
 
 // --- 2. Input Handling ---
 
@@ -102,7 +109,7 @@ ui.onInput = async (msg) => {
         case '/search':
             ui.logDiscovery(`FTS Search: "${val}"`);
             nostr.subscribe({ search: val, limit: 10 }, (event) => {
-                ui.logMessage(event.pubkey, `[SEARCH] ${event.content}`, 'Relay');
+                ui.logMessage(event.pubkey, event.content, 'Relay');
             });
             break;
 
@@ -170,10 +177,18 @@ async function start() {
         await hybrid.connect();
         ui.logDiscovery(`Network: Online.`);
 
+        // Subscribe to global notes (Kind 1)
+        nostr.subscribe({ kinds: [1] }, (event) => {
+            ui.logMessage(event.pubkey, event.content, 'Relay');
+        });
+
         // Initial P2P sync
         manager.subscribeFollowsP2P().then(events => {
-            events.forEach(e => ui.logMessage(e.pubkey, e.content, 'P2P'));
-        }).catch(err => ui.logDiscovery(`{yellow-fg}P2P Sync Warning: ${err.message}{/}`));
+            if (events && events.length > 0) {
+                ui.logDiscovery(`Found ${events.length} P2P events.`);
+                events.forEach(e => ui.logMessage(e.pubkey, e.content, 'P2P'));
+            }
+        }).catch(err => ui.logDiscovery(`{yellow-fg}P2P Sync: ${err.message}{/}`));
 
         setInterval(() => {
             const dht = bt.getDHT();
@@ -189,4 +204,8 @@ async function start() {
     }
 }
 
-start();
+// ... (at end of file)
+start().then(() => {
+    // Keep alive if UI doesn't
+    const stayAlive = setInterval(() => {}, 10000);
+});

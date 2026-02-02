@@ -132,6 +132,8 @@ export class TransportManager {
         if (!this.feedManager) throw new Error("FeedManager not initialized.");
 
         const followPubkeys = Array.from(this.wotManager.follows.keys());
+        if (followPubkeys.length === 0) return [];
+        
         console.log(`TransportManager: Resolving P2P feeds for ${followPubkeys.length} follows (all degrees)...`);
 
         const allEvents = [];

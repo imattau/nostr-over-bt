@@ -1,41 +1,50 @@
 import { ITransport } from '../interfaces/ITransport.js';
-// Intent: Use 'nostr-tools' for actual relay communication.
-// import { SimplePool } from 'nostr-tools'; 
+import { SimplePool } from 'nostr-tools/pool';
 
+/**
+ * NostrTransport implements relay-based communication using nostr-tools.
+ */
 export class NostrTransport extends ITransport {
     constructor(relays = []) {
         super();
         this.relays = relays;
-        // this.pool = new SimplePool();
+        this.pool = new SimplePool();
     }
 
-    async connect() {
-        console.log(`NostrTransport: Connecting to [${this.relays.join(', ')}]...`);
-    }
+    async connect() {}
 
     async disconnect() {
-        console.log("NostrTransport: Disconnecting...");
-        // this.pool.close(this.relays);
+        this.pool.close(this.relays);
     }
 
     addRelay(url) {
         if (!this.relays.includes(url)) {
             this.relays.push(url);
-            console.log(`NostrTransport: Added relay ${url}`);
         }
     }
 
     removeRelay(url) {
         this.relays = this.relays.filter(r => r !== url);
-        console.log(`NostrTransport: Removed relay ${url}`);
     }
 
     async publish(event) {
-        // console.log("NostrTransport: Publishing event", event);
-        return "mock-relay-id";
+        try {
+            await Promise.any(this.pool.publish(this.relays, event));
+            return event.id;
+        } catch (err) {
+            throw new Error(`NostrTransport: Publish failed: ${err.message}`);
+        }
     }
 
-    async subscribe(filter, _onEvent) {
-        console.log("NostrTransport: Subscribing with filter", filter);
+    /**
+     * Subscribes to events from relays.
+     */
+    subscribe(filter, onEvent) {
+        // In nostr-tools v2, subscribeMany takes an array of filters
+        return this.pool.subscribeMany(this.relays, [filter], {
+            onevent(event) {
+                onEvent(event);
+            }
+        });
     }
 }

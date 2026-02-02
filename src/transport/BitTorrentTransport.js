@@ -7,7 +7,7 @@ export class BitTorrentTransport extends ITransport {
         this.announce = options.announce || []; 
         this.client = new WebTorrent({
             ...options,
-            dht: options.dht === undefined ? true : options.dht, 
+            dht: options.dht !== undefined ? options.dht : true, 
             tracker: options.tracker !== false,
             webSeeds: options.webSeeds !== false
         });
@@ -138,6 +138,6 @@ export class BitTorrentTransport extends ITransport {
      * @returns {object}
      */
     getDHT() {
-        return this.client.dht;
+        return this.client.dht || this.client._dht;
     }
 }

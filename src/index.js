@@ -5,6 +5,7 @@ export { WoTManager } from './core/WoTManager.js';
 export { FeedManager } from './core/FeedManager.js';
 export { EventPackager } from './core/EventPackager.js';
 export { FeedIndex } from './core/FeedIndex.js';
+export { ProfileManager } from './core/ProfileManager.js';
 
 // Transports
 export { BitTorrentTransport } from './transport/BitTorrentTransport.js';

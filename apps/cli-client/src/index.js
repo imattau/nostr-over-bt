@@ -9,7 +9,8 @@ import {
     NostrTransport, 
     BitTorrentTransport,
     WoTManager,
-    FeedManager
+    FeedManager,
+    ProfileManager
 } from 'nostr-over-bt';
 import { TerminalUi } from './Ui.js';
 
@@ -31,6 +32,26 @@ const ui = new TerminalUi();
 const originalLog = console.log;
 const originalError = console.error;
 const originalWarn = console.warn;
+
+const tuiLog = (...args) => ui.logDiscovery(args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
+const tuiError = (...args) => ui.logDiscovery(`{red-fg}ERROR: ${args.join(' ')}{/}`);
+const tuiWarn = (...args) => ui.logDiscovery(`{yellow-fg}WARN: ${args.join(' ')}{/}`);
+
+console.log = tuiLog;
+console.error = tuiError;
+console.warn = tuiWarn;
+console.info = tuiLog;
+console.debug = tuiLog;
+
+// --- Global Error Catching (Prevents stdout leaks) ---
+process.on('uncaughtException', (err) => {
+    tuiError('Uncaught Exception:', err.message);
+});
+
+process.on('unhandledRejection', (reason) => {
+    tuiError('Unhandled Rejection:', reason);
+});
+
 
 // --- 1. Initialize Identity ---
 let privateKey;
@@ -71,6 +92,7 @@ const nostr = new NostrTransport(relays);
 const hybrid = new HybridTransport(nostr, bt);
 const wot = new WoTManager(nostr);
 const feed = new FeedManager(bt, identity);
+const profiles = new ProfileManager(nostr);
 
 const manager = new TransportManager(hybrid, { wotManager: wot, feedManager: feed });
 
@@ -109,7 +131,8 @@ ui.onInput = async (msg) => {
         case '/search':
             ui.logDiscovery(`FTS Search: "${val}"`);
             nostr.subscribe({ search: val, limit: 10 }, (event) => {
-                ui.logMessage(event.pubkey, event.content, 'Relay');
+                const name = profiles.getDisplayName(event.pubkey);
+                ui.logMessage(name, `[SEARCH] ${event.content}`, 'Relay');
             });
             break;
 
@@ -169,26 +192,37 @@ async function start() {
 
         ui.render(); 
         
-        ui.logDiscovery(`Nostr Identity: ${myNostrPk.substring(0,8)}...`);
-        ui.logDiscovery(`P2P Address: ${identity.getPublicKey().substring(0,16)}...`);
+        console.log(`Nostr Identity: ${myNostrPk.substring(0,8)}...`);
+        console.log(`P2P Address: ${identity.getPublicKey().substring(0,16)}...`);
         
-        ui.logDiscovery(`DHT Status: Connecting...`);
+        console.log(`DHT Status: Connecting...`);
         
         await hybrid.connect();
-        ui.logDiscovery(`Network: Online.`);
+        console.log(`Network: Online.`);
 
         // Subscribe to global notes (Kind 1)
-        nostr.subscribe({ kinds: [1] }, (event) => {
-            ui.logMessage(event.pubkey, event.content, 'Relay');
+        nostr.subscribe({ kinds: [1], limit: 50 }, (event) => {
+            if (event.pubkey === myNostrPk) return;
+            
+            // Background fetch profile. 
+            // On finding, subsequent posts will show the name.
+            profiles.fetchProfile(event.pubkey);
+            
+            const name = profiles.getDisplayName(event.pubkey);
+            ui.logMessage(name, event.content, 'Relay');
         });
 
         // Initial P2P sync
         manager.subscribeFollowsP2P().then(events => {
             if (events && events.length > 0) {
-                ui.logDiscovery(`Found ${events.length} P2P events.`);
-                events.forEach(e => ui.logMessage(e.pubkey, e.content, 'P2P'));
+                console.log(`Found ${events.length} P2P events.`);
+                events.forEach(e => {
+                    profiles.fetchProfile(e.pubkey);
+                    const name = profiles.getDisplayName(e.pubkey);
+                    ui.logMessage(name, e.content, 'P2P');
+                });
             }
-        }).catch(err => ui.logDiscovery(`{yellow-fg}P2P Sync: ${err.message}{/}`));
+        }).catch(err => console.warn(`P2P Sync: ${err.message}`));
 
         setInterval(() => {
             const dht = bt.getDHT();
@@ -204,8 +238,5 @@ async function start() {
     }
 }
 
-// ... (at end of file)
-start().then(() => {
-    // Keep alive if UI doesn't
-    const stayAlive = setInterval(() => {}, 10000);
-});
+start();
+const stayAlive = setInterval(() => {}, 10000);

@@ -1,4 +1,5 @@
 import { EventPackager } from './EventPackager.js';
+import { FeedTracker } from './FeedTracker.js';
 
 /**
  * TransportManager coordinates the end-to-end flow of packaging an event,
@@ -27,6 +28,7 @@ export class TransportManager {
         this.packager = new EventPackager();
         this.keyCache = new Map(); // nostrPubkey -> transportPubkey
         this.magnetCache = new Map(); // eventId -> magnetUri
+        this.tracker = new FeedTracker(this);
     }
 
     /**
@@ -87,11 +89,6 @@ export class TransportManager {
 
     /**
      * Recursively syncs the WoT graph via P2P.
-     * 1. Fetches follow lists for Degree 1.
-     * 2. For each discovered user, fetches their follow list (Degree 2).
-     * 3. Continues until maxDegree is reached.
-     * 
-     * @returns {Promise<void>}
      */
     async syncWoTRecursiveP2P() {
         if (!this.wotManager) throw new Error("WoTManager not initialized.");
@@ -106,7 +103,7 @@ export class TransportManager {
                 try {
                     const tpk = await this.resolveTransportKey(pk);
                     if (tpk) {
-                        const events = await this.subscribeP2P(tpk);
+                        const events = await this.subscribeP2P(tpk, pk);
                         const contactList = events.find(e => e.kind === 3);
                         if (contactList) {
                             const fullEventJson = await this.transport.bt.fetch(contactList.magnet);
@@ -140,7 +137,7 @@ export class TransportManager {
         const resolvePromises = followPubkeys.map(async (npk) => {
             const tpk = await this.resolveTransportKey(npk);
             if (tpk) {
-                const events = await this.subscribeP2P(tpk);
+                const events = await this.subscribeP2P(tpk, npk);
                 allEvents.push(...events);
             }
         });
@@ -171,25 +168,17 @@ export class TransportManager {
     }
 
     /**
-     * Subscribes to a user's P2P feed (resolves DHT pointer).
+     * Subscribes to a user's P2P feed.
+     * Uses FeedTracker to find the magnet (DHT or Relay-bridge).
+     * 
      * @param {string} transportPubkey - The Transport Public Key (hex).
+     * @param {string} [nostrPubkey] - The associated Nostr pubkey (helps Relay discovery).
      * @returns {Promise<Array>} - List of recent events (metadata/pointers).
      */
-    async subscribeP2P(transportPubkey) {
-        if (!this.feedManager) throw new Error("FeedManager not initialized.");
+    async subscribeP2P(transportPubkey, nostrPubkey = null) {
+        const magnet = await this.tracker.discover(transportPubkey, nostrPubkey);
+        if (!magnet) return [];
 
-        // 1. Resolve DHT Pointer
-        let pointer;
-        try {
-            pointer = await this.feedManager.resolveFeedPointer(transportPubkey);
-        } catch (e) {
-            throw new Error(`DHT resolution failed: ${e.message}`);
-        }
-
-        if (!pointer) return [];
-
-        // 2. Fetch Index Torrent
-        const magnet = `magnet:?xt=urn:btih:${pointer.infoHash}`;
         try {
             const indexBuf = await this.transport.bt.fetch(magnet);
             const data = JSON.parse(indexBuf.toString());
@@ -266,16 +255,15 @@ export class TransportManager {
 
     /**
      * Reseeds an event that was fetched from a relay.
-     * Optimization: Uses memory cache and background processing to prevent blocking.
+     * Optimization: Checks memory cache and existing "bt" tags before hashing.
      * 
      * @param {object} event - The Nostr event to seed.
      * @param {boolean} [background=true] - If true, resolves instantly while seeding in background.
-     * @returns {Promise<string>} - The magnet URI (or cached URI).
+     * @returns {Promise<string>} - The magnet URI.
      */
     async reseedEvent(event, background = true) {
         if (!event || !event.id) throw new Error("Invalid event for reseeding.");
 
-        // 1. Instant Cache/Tag Check
         if (this.magnetCache.has(event.id)) return this.magnetCache.get(event.id);
         const existingBt = event.tags?.find(t => t[0] === 'bt');
         if (existingBt && existingBt[1]) {
@@ -283,15 +271,12 @@ export class TransportManager {
             return existingBt[1];
         }
 
-        // 2. Perform Hashing and DHT Announcement
         const performSeed = async () => {
             try {
                 const buffer = this.packager.package(event);
                 const filename = this.packager.getFilename(event);
                 const magnetUri = await this.transport.bt.publish({ buffer, filename });
                 this.magnetCache.set(event.id, magnetUri);
-                
-                // If we have a FeedManager (Relay mode), update the global index
                 if (this.feedManager) {
                     await this.feedManager.updateFeed(event, magnetUri);
                 }
@@ -303,10 +288,8 @@ export class TransportManager {
         };
 
         if (background) {
-            // Kick off process but don't await result
+            console.log(`TransportManager: Queuing background seed for ${event.id.substring(0,8)}...`);
             performSeed().catch(() => {}); 
-            // Return a "likely" magnet if we can calculate it, or just resolve null for now
-            // For now, we return a placeholder or the ID to signify "queued"
             return `queued:${event.id}`;
         }
 

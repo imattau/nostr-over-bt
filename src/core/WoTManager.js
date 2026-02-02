@@ -68,6 +68,19 @@ export class WoTManager {
     }
 
     /**
+     * Manually adds a follow to the graph.
+     * @param {string} pubkey 
+     * @param {number} [degree=1] 
+     */
+    addFollow(pubkey, degree = 1) {
+        const existing = this.follows.get(pubkey);
+        if (!existing || existing.degree > degree) {
+            this.follows.set(pubkey, { degree, lastSynced: 0 });
+            console.log(`WoTManager: Manually added follow ${pubkey.substring(0,8)} at degree ${degree}`);
+        }
+    }
+
+    /**
      * Returns all pubkeys at a specific degree.
      * @param {number} degree 
      * @returns {Array<string>}

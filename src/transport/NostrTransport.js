@@ -13,8 +13,18 @@ export class NostrTransport extends ITransport {
 
     async connect() {}
 
+    /**
+     * Closes connections to all relays in the pool.
+     */
     async disconnect() {
-        this.pool.close(this.relays);
+        try {
+            // In nostr-tools v2, we should remove individual relays to close their connections properly
+            for (const url of this.relays) {
+                this.pool.close([url]);
+            }
+        } catch (e) {
+            console.warn("NostrTransport: Error during disconnect", e.message);
+        }
     }
 
     addRelay(url) {
@@ -38,10 +48,13 @@ export class NostrTransport extends ITransport {
 
     /**
      * Subscribes to events from relays.
+     * Note: nostr-tools v2 subscribeMany takes a single Filter object, not an array.
      */
     subscribe(filter, onEvent) {
-        // In nostr-tools v2, subscribeMany takes an array of filters
-        return this.pool.subscribeMany(this.relays, [filter], {
+        // Ensure we pass a single clean object
+        const cleanFilter = Array.isArray(filter) ? filter[0] : filter;
+        
+        return this.pool.subscribeMany(this.relays, cleanFilter, {
             onevent(event) {
                 onEvent(event);
             }

@@ -3,13 +3,33 @@ import contrib from 'blessed-contrib';
 
 export class TerminalUi {
     constructor() {
-        this.screen = blessed.screen({ smartCSR: true, title: 'Nostr-over-BT Command Center' });
+        this.screen = blessed.screen({
+            smartCSR: true,
+            title: 'Nostr-over-BT Command Center',
+            mouse: true // Enable mouse support
+        });
         this.grid = new contrib.grid({ rows: 12, cols: 12, screen: this.screen });
 
         // 1. Live Feed
         this.timeline = this.grid.set(0, 0, 8, 6, blessed.log, {
-            label: ' 📜 Global Feed ', tags: true, border: { type: 'line' },
-            style: { border: { fg: 'cyan' } }
+            label: ' 📜 Global Feed ',
+            tags: true,
+            border: { type: 'line' },
+            style: { border: { fg: 'cyan' } },
+            scrollable: true,
+            alwaysScroll: true,
+            wrap: true,
+            scrollbar: { ch: ' ', inverse: true }
+        });
+
+        // Mouse wheel support for the timeline
+        this.timeline.on('wheeldown', () => {
+            this.timeline.scroll(2);
+            this.screen.render();
+        });
+        this.timeline.on('wheelup', () => {
+            this.timeline.scroll(-2);
+            this.screen.render();
         });
 
         // 2. Swarm Map
@@ -51,23 +71,32 @@ export class TerminalUi {
     setupKeys() {
         this.screen.key(['escape', 'C-c'], () => process.exit(0));
 
-        // Use a more robust key listener for the screen to catch Tab
         this.screen.on('keypress', (ch, key) => {
+            // Tab for Auto-completion
             if (key.name === 'tab' && this.input.focused) {
                 const val = this.input.getValue();
                 if (val.startsWith('/')) {
-                    // Find the next matching command (basic cycling)
                     const matches = this.commands.filter(c => c.startsWith(val.trim()));
                     if (matches.length > 0) {
-                        // For now, just take the first match or cycle if already a match
                         const currentMatchIndex = matches.indexOf(val.trim());
                         const nextMatch = matches[(currentMatchIndex + 1) % matches.length];
-                        
                         this.input.setValue(nextMatch + ' ');
                         this.screen.render();
                     }
                 }
-                return false; // Prevent default focus switch
+                return false;
+            }
+
+            // PageUp / PageDown for scrolling the feed
+            if (key.name === 'pageup' || key.full === 'pageup' || key.name === 'prior') {
+                this.timeline.scroll(-5);
+                this.screen.render();
+                return false;
+            }
+            if (key.name === 'pagedown' || key.full === 'pagedown' || key.name === 'next') {
+                this.timeline.scroll(5);
+                this.screen.render();
+                return false;
             }
         });
 
@@ -84,7 +113,20 @@ export class TerminalUi {
     logMessage(author, content, source = 'Relay') {
         const color = source === 'P2P' ? 'green' : 'blue';
         const time = new Date().toLocaleTimeString();
-        this.timeline.log(`{grey-fg}[${time}]{/} {bold}{yellow-fg}${author.substring(0,8)}{/} {${color}-fg}[${source}]{/}: ${content}`);
+        
+        // Header line
+        this.timeline.log(`{bold}{yellow-fg}${author.substring(0,8)}{/} {grey-fg}${time}{/} {${color}-fg}[${source}]{/}`);
+        
+        // Escape content to prevent {tags} in Nostr posts from breaking the UI
+        const escapedContent = blessed.escape(content).replace(/\n/g, '\n ');
+        this.timeline.log(` ${escapedContent}`);
+        
+        // Dynamic separator width - use a safe fixed percentage or floor
+        const width = Math.max(10, Math.floor(this.timeline.width - 6));
+        const separator = width > 0 ? '─'.repeat(width) : '───';
+        this.timeline.log(`{grey-fg}${separator}{/}`);
+        
+        this.screen.render();
     }
 
     logDiscovery(msg) {

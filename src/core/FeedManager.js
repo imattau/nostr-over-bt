@@ -1,4 +1,4 @@
-import ed25519 from 'ed25519-supercop';
+import nacl from 'tweetnacl';
 import crypto from 'crypto';
 import { FeedIndex } from './FeedIndex.js';
 
@@ -7,13 +7,6 @@ import { FeedIndex } from './FeedIndex.js';
  * It interacts with the DHT to publish/resolve mutable records (BEP-44).
  */
 export class FeedManager {
-    /**
-     * @param {BitTorrentTransport} btTransport 
-     * @param {IdentityManager} identityManager 
-     * @param {object} [options={}]
-     * @param {number} [options.initialSeq=1] - Initial sequence number if known.
-     * @param {number} [options.indexLimit=100] - Max items in the feed index.
-     */
     constructor(btTransport, identityManager, options = {}) {
         this.bt = btTransport;
         this.identity = identityManager;
@@ -21,11 +14,6 @@ export class FeedManager {
         this.index = new FeedIndex(options.indexLimit || 100);
     }
 
-    /**
-     * Syncs the sequence number with the latest record on the DHT.
-     * Essential for maintaining persistence after a restart.
-     * @returns {Promise<number>} - The new current sequence number.
-     */
     async syncSequence() {
         try {
             const pubkey = this.identity.getPublicKey();
@@ -35,57 +23,52 @@ export class FeedManager {
                 console.log(`FeedManager: Synced sequence number from DHT: ${this.seq}`);
             }
         } catch (error) {
-            console.warn("FeedManager: Failed to sync sequence number, defaulting to current.", error.message);
+            console.warn("FeedManager: Failed to sync sequence number.", error.message);
         }
         return this.seq;
     }
 
     /**
      * Updates the P2P feed with a new event.
-     * 1. Adds event to local FeedIndex.
-     * 2. Seeds the new index.json.
-     * 3. Updates the DHT pointer to the new index.
-     * 
      * @param {object} event - The Nostr event.
      * @param {string} magnetUri - The magnet for the event content.
-     * @returns {Promise<string>} - The magnet URI of the updated Index.
+     * @param {function} [signNostr] - Optional callback to sign a Nostr discovery event.
      */
-    async updateFeed(event, magnetUri) {
-        // 1. Update Index
+    async updateFeed(event, magnetUri, signNostr = null) {
         this.index.add(event, magnetUri);
         const buffer = this.index.toBuffer();
-        
-        // 2. Seed Index
         const indexMagnet = await this.bt.publish({ buffer, filename: 'index.json' });
         
-        // Extract InfoHash from magnet
         const match = indexMagnet.match(/xt=urn:btih:([a-zA-Z0-9]+)/);
         if (!match) throw new Error(`Invalid magnet URI from transport: ${indexMagnet}`);
         const infoHash = match[1];
 
-        // 3. Validate InfoHash (should be 40 char hex for v1)
         if (!/^[a-fA-F0-9]{40}$/.test(infoHash)) {
-            throw new Error(`Invalid InfoHash extracted: ${infoHash}. Expected 40-character hex.`);
+            throw new Error(`Invalid InfoHash extracted: ${infoHash}.`);
         }
 
-        // 4. Update DHT Pointer
+        // 1. Update DHT (P2P Discovery)
         await this.publishFeedPointer(infoHash);
+
+        // 2. Update Nostr Relay (Bridge Discovery for Browsers)
+        if (signNostr && this.bt.announce.length > 0) {
+            const discoveryEvent = {
+                kind: 30078,
+                created_at: Math.floor(Date.now() / 1000),
+                tags: [['d', 'nostr-over-bt-feed']],
+                content: indexMagnet
+            };
+            const signed = await signNostr(discoveryEvent);
+            // The TransportManager will broadcast this to relays
+            return { indexMagnet, discoveryEvent: signed };
+        }
 
         return indexMagnet;
     }
 
-    /**
-     * Publishes a pointer to the given InfoHash (the "Feed Torrent").
-     * @param {string} infoHash - The InfoHash of the feed index torrent (hex string).
-     * @returns {Promise<string>} - The public key (address) of the record.
-     */
     async publishFeedPointer(infoHash, retries = 3) {
-        if (!/^[a-fA-F0-9]{40}$/.test(infoHash)) {
-            throw new Error(`Invalid InfoHash: ${infoHash}. Expected 40-character hex.`);
-        }
-
         const dht = this.bt.getDHT();
-        if (!dht) throw new Error("DHT not available. Ensure WebTorrent client is ready.");
+        if (!dht) throw new Error("DHT not available.");
 
         const keypair = this.identity.getKeypair();
 
@@ -100,8 +83,8 @@ export class FeedManager {
                         npk: this.identity.nostrPubkey ? Buffer.from(this.identity.nostrPubkey, 'hex') : undefined
                     },
                     sign: (buf) => {
-                        if (!Buffer.isBuffer(buf)) buf = Buffer.from(buf);
-                        return ed25519.sign(buf, keypair.publicKey, keypair.secretKey);
+                        // Use tweetnacl for synchronous Ed25519 signing (BEP-44 requirement)
+                        return nacl.sign.detached(buf, keypair.secretKey);
                     }
                 };
 
@@ -124,24 +107,19 @@ export class FeedManager {
         return await attempt(retries);
     }
 
-    /**
-     * Resolves a feed pointer from the DHT.
-     * @param {string} transportPubkey - The Transport Public Key (hex).
-     * @returns {Promise<object>} - { infoHash, timestamp }
-     */
     async resolveFeedPointer(transportPubkey) {
         const dht = this.bt.getDHT();
         if (!dht) throw new Error("DHT not available.");
 
         return new Promise((resolve, reject) => {
             const publicKeyBuffer = Buffer.from(transportPubkey, 'hex');
-            
-            // Calculate BEP-44 Target: SHA1(k)
+            // Browser-safe SHA1 if needed, but bittorrent-dht handles it usually.
+            // For mock/local consistency we use Node's crypto or a shim.
             const target = crypto.createHash('sha1').update(publicKeyBuffer).digest();
             
             dht.get(target, (err, res) => {
                 if (err) return reject(err);
-                if (!res || !res.v) return resolve(null); // Not found
+                if (!res || !res.v) return resolve(null);
 
                 try {
                     const infoHash = res.v.ih.toString('hex');

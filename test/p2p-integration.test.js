@@ -75,8 +75,8 @@ describe('P2P End-to-End Integration', () => {
             test('Bob discovers Alice events by following her Nostr pubkey', async () => {
 
                 // Setup Alice
-
-                const aliceIdentity = new IdentityManager(null, 'alice-nostr-pk');
+                const aliceNostrPk = '00'.repeat(32);
+                const aliceIdentity = new IdentityManager(null, aliceNostrPk);
 
                 aliceIdentity.generate();
 
@@ -96,7 +96,7 @@ describe('P2P End-to-End Integration', () => {
 
                     feedManager: new FeedManager(aliceBT, new IdentityManager()),
 
-                    wotManager: { follows: new Set(['alice-nostr-pk']) }
+                    wotManager: { follows: new Set([aliceNostrPk]) }
 
                 });
 

@@ -1,5 +1,8 @@
 import nacl from 'tweetnacl';
-import crypto from 'crypto';
+import { generateSecretKey } from 'nostr-tools';
+import { bytesToHex, hexToBytes } from 'nostr-tools/utils';
+import { logger } from '../utils/Logger.js';
+import { Kinds, Identifiers } from '../Constants.js';
 
 /**
  * Manages the Identity for P2P Discovery.
@@ -8,7 +11,7 @@ import crypto from 'crypto';
  */
 export class IdentityManager {
     /**
-     * @param {Buffer|Uint8Array|string} [secretKey] - Optional existing 32-byte seed.
+     * @param {Uint8Array|string} [secretKey] - Optional existing 32-byte seed.
      * @param {string} [nostrPubkey] - Optional associated Nostr public key.
      */
     constructor(secretKey = null, nostrPubkey = null) {
@@ -29,20 +32,16 @@ export class IdentityManager {
     }
 
     generate() {
-        // Use browser-safe getRandomValues if available, fallback to Node crypto
-        this.seed = (typeof window !== 'undefined' && window.crypto) 
-            ? window.crypto.getRandomValues(new Uint8Array(32)) 
-            : crypto.randomBytes(32);
-            
+        this.seed = generateSecretKey();
         this.keypair = nacl.sign.keyPair.fromSeed(this.seed);
-        console.log("IdentityManager: Generated new Transport Keypair.");
+        logger.log("Generated new Transport Keypair.");
     }
 
     load(secretKey) {
         if (typeof secretKey === 'string') {
-            this.seed = Buffer.from(secretKey, 'hex');
+            this.seed = hexToBytes(secretKey);
         } else {
-            this.seed = new Uint8Array(secretKey);
+            this.seed = secretKey;
         }
 
         if (this.seed.length !== 32) {
@@ -50,17 +49,17 @@ export class IdentityManager {
         }
         
         this.keypair = nacl.sign.keyPair.fromSeed(this.seed);
-        console.log("IdentityManager: Loaded existing Identity.");
+        logger.log("Loaded existing Identity.");
     }
 
     getSecretKey() {
         if (!this.seed) throw new Error("No identity generated.");
-        return Buffer.from(this.seed).toString('hex');
+        return bytesToHex(this.seed);
     }
 
     getPublicKey() {
         if (!this.keypair) throw new Error("No identity generated.");
-        return Buffer.from(this.keypair.publicKey).toString('hex');
+        return bytesToHex(this.keypair.publicKey);
     }
 
     getKeypair() {
@@ -70,9 +69,9 @@ export class IdentityManager {
 
     createAttestation(nostrPubkey) {
         return {
-            kind: 30078,
+            kind: Kinds.Application,
             created_at: Math.floor(Date.now() / 1000),
-            tags: [['d', 'nostr-over-bt-identity']],
+            tags: [['d', Identifiers.IDENTITY_BRIDGE]],
             content: this.getPublicKey(),
             pubkey: nostrPubkey
         };

@@ -22,6 +22,9 @@ describe('End-to-End Integration', () => {
             sig: 'test-sig'
         };
 
+        // Mock Nostr publish to succeed
+        jest.spyOn(nostr, 'publish').mockResolvedValue(mockEvent.id);
+
         try {
             const result = await manager.publish(mockEvent);
 

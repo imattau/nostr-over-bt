@@ -1,3 +1,5 @@
+import { NostrBTError } from '../utils/Errors.js';
+
 /**
  * Abstract Base Class for Transport Layers.
  * Enforces implementation of core transport methods.
@@ -5,7 +7,7 @@
 export class ITransport {
     constructor() {
         if (this.constructor === ITransport) {
-            throw new Error("Abstract classes can't be instantiated.");
+            throw new NostrBTError("Abstract classes can't be instantiated.");
         }
     }
 
@@ -14,7 +16,7 @@ export class ITransport {
      * @returns {Promise<void>}
      */
     async connect() {
-        throw new Error("Method 'connect()' must be implemented.");
+        throw new NostrBTError("Method 'connect()' must be implemented.");
     }
 
     /**
@@ -22,7 +24,7 @@ export class ITransport {
      * @returns {Promise<void>}
      */
     async disconnect() {
-        throw new Error("Method 'disconnect()' must be implemented.");
+        throw new NostrBTError("Method 'disconnect()' must be implemented.");
     }
 
     /**
@@ -31,16 +33,16 @@ export class ITransport {
      * @returns {Promise<string>} - Returns the ID or status of the published event.
      */
     async publish(_event) {
-        throw new Error("Method 'publish()' must be implemented.");
+        throw new NostrBTError("Method 'publish()' must be implemented.");
     }
 
     /**
      * Subscribe to events.
      * @param {object} _filter - The subscription filter.
      * @param {function} _onEvent - Callback when an event is received.
-     * @returns {Promise<void>}
+     * @returns {{ close: function }} - A subscription object with a close method.
      */
-    async subscribe(_filter, _onEvent) {
-        throw new Error("Method 'subscribe()' must be implemented.");
+    subscribe(_filter, _onEvent) {
+        throw new NostrBTError("Method 'subscribe()' must be implemented.");
     }
 }

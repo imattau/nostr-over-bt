@@ -1,12 +1,28 @@
+import { z } from 'zod';
+import { Limits } from '../Constants.js';
+
+/**
+ * Feed Index Schema.
+ */
+const FeedIndexSchema = z.object({
+    updated_at: z.number(),
+    items: z.array(z.object({
+        id: z.string().min(1),
+        magnet: z.string().startsWith('magnet:'),
+        ts: z.number(),
+        kind: z.number().optional()
+    }))
+});
+
 /**
  * FeedIndex manages the list of events in a user's P2P feed.
  * It handles the data structure serialized into the 'index.json' file.
  */
 export class FeedIndex {
     /**
-     * @param {number} [limit=100] - Maximum number of events to keep in the index.
+     * @param {number} [limit=Limits.FEED_INDEX_LIMIT] - Maximum number of events to keep in the index.
      */
-    constructor(limit = 100) {
+    constructor(limit = Limits.FEED_INDEX_LIMIT) {
         this.limit = limit;
         this.items = []; // Array of { id, magnet, ts, kind }
         this.updatedAt = 0;
@@ -60,13 +76,12 @@ export class FeedIndex {
      */
     loadFromBuffer(buffer) {
         try {
-            const data = JSON.parse(buffer.toString());
-            if (Array.isArray(data.items)) {
-                this.items = data.items;
-                this.updatedAt = data.updated_at || 0;
-            }
+            const rawData = JSON.parse(buffer.toString());
+            const data = FeedIndexSchema.parse(rawData);
+            this.items = data.items;
+            this.updatedAt = data.updated_at;
         } catch (error) {
-            console.warn("FeedIndex: Failed to load from buffer", error);
+            console.warn("FeedIndex: Failed to load from buffer", error.message);
             // Start fresh if corrupted
             this.items = [];
         }

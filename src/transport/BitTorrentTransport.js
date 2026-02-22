@@ -1,5 +1,7 @@
 import { ITransport } from '../interfaces/ITransport.js';
 import WebTorrent from 'webtorrent';
+import { logger } from '../utils/Logger.js';
+import { TransportError, TimeoutError } from '../utils/Errors.js';
 
 export class BitTorrentTransport extends ITransport {
     constructor(options = {}) {
@@ -17,15 +19,15 @@ export class BitTorrentTransport extends ITransport {
     }
 
     async connect() {
-        if (this.client.destroyed) throw new Error("Client was destroyed.");
-        console.log(`BitTorrentTransport: Online (DHT: ${this.client.dht ? 'Enabled' : 'Disabled'}).`);
+        if (this.client.destroyed) throw new TransportError("Client was destroyed.", "bittorrent");
+        logger.log(`Online (DHT: ${this.client.dht ? 'Enabled' : 'Disabled'}).`);
     }
 
     async disconnect() {
         return new Promise((resolve) => {
-            console.log("BitTorrentTransport: Shutting down client...");
+            logger.log("Shutting down client...");
             this.client.destroy((err) => {
-                if (err) console.error("Error during BT shutdown:", err.message);
+                if (err) logger.error("Error during BT shutdown:", err.message);
                 resolve();
             });
         });
@@ -34,7 +36,7 @@ export class BitTorrentTransport extends ITransport {
     addTracker(url) {
         if (!this.announce.includes(url)) {
             this.announce.push(url);
-            console.log(`BitTorrentTransport: Added tracker ${url}`);
+            logger.log(`Added tracker ${url}`);
             // Note: For existing torrents, we'd need to call announce on them
             this.client.torrents.forEach(t => t.announce([url]));
         }
@@ -55,13 +57,12 @@ export class BitTorrentTransport extends ITransport {
             }
 
             this.client.seed(buffer, opts, (torrent) => {
-                // console.log(`BitTorrentTransport: Seeding ${filename}. Magnet: ${torrent.magnetURI}`);
                 resolve(torrent.magnetURI);
             });
 
             // Error handling for the client
-            this.client.on('error', (err) => {
-                reject(err);
+            this.client.once('error', (err) => {
+                reject(new TransportError(err.message, "bittorrent"));
             });
         });
     }
@@ -75,8 +76,7 @@ export class BitTorrentTransport extends ITransport {
         return new Promise((resolve, reject) => {
             // Set a timeout for the fetch
             const timeout = setTimeout(() => {
-                // this.client.remove(magnetUri); // Cleanup?
-                reject(new Error("BitTorrent fetch timed out"));
+                reject(new TimeoutError("BitTorrent fetch timed out", 5000));
             }, 5000); // 5s timeout for demo
 
             this.client.add(magnetUri, (torrent) => {
@@ -84,17 +84,14 @@ export class BitTorrentTransport extends ITransport {
                 const file = torrent.files[0];
                 if (!file) {
                     clearTimeout(timeout);
-                    reject(new Error("No files in torrent"));
+                    reject(new TransportError("No files in torrent", "bittorrent"));
                     return;
                 }
 
                 file.getBuffer((err, buffer) => {
                     clearTimeout(timeout);
-                    if (err) reject(err);
+                    if (err) reject(new TransportError(err.message, "bittorrent"));
                     else resolve(buffer);
-                    
-                    // Optional: Destroy torrent after fetch if we don't want to seed
-                    // torrent.destroy();
                 });
             });
         });
@@ -114,7 +111,7 @@ export class BitTorrentTransport extends ITransport {
 
             const timer = setTimeout(() => {
                 dht.removeListener('node', onNode);
-                reject(new Error("DHT bootstrap timed out."));
+                reject(new TimeoutError("DHT bootstrap timed out.", timeout));
             }, timeout);
 
             const onNode = () => {
@@ -129,8 +126,11 @@ export class BitTorrentTransport extends ITransport {
         });
     }
 
-    async subscribe(filter, _onEvent) {
-        console.log("BitTorrentTransport: Listening for DHT matches", filter);
+    subscribe(filter, _onEvent) {
+        logger.log("Listening for DHT matches", filter);
+        return {
+            close: () => logger.log("DHT subscription closed")
+        };
     }
 
     /**

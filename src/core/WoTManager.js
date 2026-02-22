@@ -1,3 +1,7 @@
+import { awaitEventWithTimeout } from '../utils/AsyncUtils.js';
+import { logger } from '../utils/Logger.js';
+import { Kinds } from '../Constants.js';
+
 /**
  * WoTManager handles the "Web of Trust" logic.
  * It maintains a list of users that the local user follows,
@@ -19,20 +23,14 @@ export class WoTManager {
     async refreshFollows(userPubkey) {
         this.myPubkey = userPubkey;
         this.follows.set(userPubkey, { degree: 0, lastSynced: Date.now() });
-        console.log(`WoTManager: Refreshing primary follows for ${userPubkey}...`);
+        logger.log(`Refreshing primary follows for ${userPubkey}...`);
 
-        return new Promise((resolve) => {
-            const filter = { authors: [userPubkey], kinds: [3], limit: 1 };
-            const timeout = setTimeout(() => resolve(), 5000);
-
-            this.nostr.subscribe(filter, (event) => {
-                if (event.kind === 3) {
-                    clearTimeout(timeout);
-                    this._parseContactList(event, 1);
-                    resolve();
-                }
-            });
-        });
+        const filter = { authors: [userPubkey], kinds: [Kinds.Contacts], limit: 1 };
+        const event = await awaitEventWithTimeout(this.nostr, filter, 5000, (e) => e.kind === Kinds.Contacts);
+        
+        if (event) {
+            this._parseContactList(event, 1);
+        }
     }
 
     /**
@@ -55,7 +53,7 @@ export class WoTManager {
                 }
             }
         }
-        console.log(`WoTManager: Graph expanded. Total nodes: ${this.follows.size}`);
+        logger.log(`Graph expanded. Total nodes: ${this.follows.size}`);
     }
 
     /**
@@ -76,7 +74,7 @@ export class WoTManager {
         const existing = this.follows.get(pubkey);
         if (!existing || existing.degree > degree) {
             this.follows.set(pubkey, { degree, lastSynced: 0 });
-            console.log(`WoTManager: Manually added follow ${pubkey.substring(0,8)} at degree ${degree}`);
+            logger.log(`Manually added follow ${pubkey.substring(0,8)} at degree ${degree}`);
         }
     }
 

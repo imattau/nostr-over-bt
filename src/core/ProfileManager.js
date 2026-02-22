@@ -1,3 +1,7 @@
+import { LRUCache } from 'lru-cache';
+import { logger } from '../utils/Logger.js';
+import { Kinds, Limits } from '../Constants.js';
+
 /**
  * ProfileManager handles fetching and caching of Nostr metadata (Kind 0).
  * Implements aggressive batching to avoid "Too many concurrent REQs" errors.
@@ -8,12 +12,15 @@ export class ProfileManager {
      */
     constructor(nostrTransport) {
         this.nostr = nostrTransport;
-        this.cache = new Map(); 
+        this.cache = new LRUCache({
+            max: Limits.PROFILE_CACHE_SIZE,
+            ttl: 1000 * 60 * 60 * 24 // 24 hours
+        }); 
         this.pending = new Set(); 
         this.queue = new Set();   
         this.batchTimeout = null;
-        this.BATCH_INTERVAL = 2000; // Wait 2s to collect more keys
-        this.MAX_BATCH_SIZE = 50;   // Cap per REQ
+        this.BATCH_INTERVAL = Limits.BATCH_INTERVAL_MS;
+        this.MAX_BATCH_SIZE = Limits.MAX_BATCH_SIZE;
     }
 
     getDisplayName(pubkey) {
@@ -50,12 +57,12 @@ export class ProfileManager {
 
     _fetchChunk(pubkeys) {
         pubkeys.forEach(pk => this.pending.add(pk));
-        console.log(`ProfileManager: Fetching chunk of ${pubkeys.length} profiles...`);
+        logger.log(`Fetching chunk of ${pubkeys.length} profiles...`);
 
         // Use a one-shot subscription that closes after EOSE or timeout
         const sub = this.nostr.subscribe({
             authors: pubkeys,
-            kinds: [0]
+            kinds: [Kinds.Metadata]
         }, (event) => {
             try {
                 const profile = JSON.parse(event.content);

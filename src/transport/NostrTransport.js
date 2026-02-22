@@ -1,5 +1,7 @@
 import { ITransport } from '../interfaces/ITransport.js';
 import { SimplePool } from 'nostr-tools/pool';
+import { logger } from '../utils/Logger.js';
+import { TransportError } from '../utils/Errors.js';
 
 /**
  * NostrTransport implements relay-based communication using nostr-tools.
@@ -23,7 +25,7 @@ export class NostrTransport extends ITransport {
                 this.pool.close([url]);
             }
         } catch (e) {
-            console.warn("NostrTransport: Error during disconnect", e.message);
+            logger.warn("Error during disconnect", e.message);
         }
     }
 
@@ -42,11 +44,11 @@ export class NostrTransport extends ITransport {
             const results = await Promise.allSettled(this.pool.publish(this.relays, event));
             const fulfilled = results.filter(r => r.status === 'fulfilled');
             if (fulfilled.length === 0) {
-                throw new Error("Relay rejected event");
+                throw new TransportError("Relay rejected event", "nostr");
             }
             return event.id;
         } catch (err) {
-            throw new Error(`NostrTransport: ${err.message}`);
+            throw new TransportError(err.message, "nostr");
         }
     }
 

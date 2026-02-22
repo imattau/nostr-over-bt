@@ -1,5 +1,12 @@
+import { LRUCache } from 'lru-cache';
+import magnet from 'magnet-uri';
 import { EventPackager } from './EventPackager.js';
 import { FeedTracker } from './FeedTracker.js';
+import { awaitEventWithTimeout } from '../utils/AsyncUtils.js';
+import { findTagValue } from '../utils/TagUtils.js';
+import { logger } from '../utils/Logger.js';
+import { TransportError } from '../utils/Errors.js';
+import { Kinds, Identifiers, Limits } from '../Constants.js';
 
 /**
  * TransportManager coordinates the end-to-end flow of packaging an event,
@@ -26,8 +33,8 @@ export class TransportManager {
         }
 
         this.packager = new EventPackager();
-        this.keyCache = new Map(); // nostrPubkey -> transportPubkey
-        this.magnetCache = new Map(); // eventId -> magnetUri
+        this.keyCache = new LRUCache({ max: Limits.KEY_CACHE_SIZE }); // nostrPubkey -> transportPubkey
+        this.magnetCache = new LRUCache({ max: Limits.MAGNET_CACHE_SIZE }); // eventId -> magnetUri
         this.tracker = new FeedTracker(this);
     }
 
@@ -41,24 +48,21 @@ export class TransportManager {
     async resolveTransportKey(nostrPubkey) {
         if (this.keyCache.has(nostrPubkey)) return this.keyCache.get(nostrPubkey);
 
-        return new Promise((resolve) => {
-            const filter = {
-                authors: [nostrPubkey],
-                kinds: [30078],
-                '#d': ['nostr-over-bt-identity'],
-                limit: 1
-            };
+        const filter = {
+            authors: [nostrPubkey],
+            kinds: [Kinds.Application],
+            '#d': [Identifiers.IDENTITY_BRIDGE],
+            limit: 1
+        };
 
-            const timeout = setTimeout(() => resolve(null), 5000);
+        const event = await awaitEventWithTimeout(this.transport.nostr, filter, 5000, (e) => e.content && e.content.length === 64);
+        
+        if (event) {
+            this.keyCache.set(nostrPubkey, event.content);
+            return event.content;
+        }
 
-            this.transport.nostr.subscribe(filter, (event) => {
-                if (event.content && event.content.length === 64) {
-                    clearTimeout(timeout);
-                    this.keyCache.set(nostrPubkey, event.content);
-                    resolve(event.content);
-                }
-            });
-        });
+        return null;
     }
 
     /**
@@ -70,14 +74,14 @@ export class TransportManager {
      * @returns {Promise<void>}
      */
     async bootstrapWoTP2P(transportPubkey, nostrPubkey = null) {
-        if (!this.wotManager) throw new Error("WoTManager not initialized.");
+        if (!this.wotManager) throw new TransportError("WoTManager not initialized.", "core");
         
-        console.log(`TransportManager: Bootstrapping WoT from P2P address ${transportPubkey}...`);
+        logger.log(`Bootstrapping WoT from P2P address ${transportPubkey}...`);
         
         const events = await this.subscribeP2P(transportPubkey, nostrPubkey);
         
         // Find latest Kind 3 (Contact List) in the P2P feed
-        const contactList = events.find(e => e.kind === 3);
+        const contactList = events.find(e => e.kind === Kinds.Contacts);
         if (contactList) {
             const fullEventJson = await this.transport.bt.fetch(contactList.magnet);
             const fullEvent = JSON.parse(fullEventJson.toString());
@@ -92,20 +96,20 @@ export class TransportManager {
      * Recursively syncs the WoT graph via P2P.
      */
     async syncWoTRecursiveP2P() {
-        if (!this.wotManager) throw new Error("WoTManager not initialized.");
+        if (!this.wotManager) throw new TransportError("WoTManager not initialized.", "core");
         
-        console.log(`TransportManager: Starting recursive WoT sync (Max Degree: ${this.wotManager.maxDegree})...`);
+        logger.log(`Starting recursive WoT sync (Max Degree: ${this.wotManager.maxDegree})...`);
 
         for (let d = 1; d < this.wotManager.maxDegree; d++) {
             const currentNodes = this.wotManager.getPubkeysAtDegree(d);
-            console.log(`TransportManager: Level ${d} has ${currentNodes.length} nodes. Fetching their follows (Level ${d+1})...`);
+            logger.log(`Level ${d} has ${currentNodes.length} nodes. Fetching their follows (Level ${d+1})...`);
 
             const promises = currentNodes.map(async (pk) => {
                 try {
                     const tpk = await this.resolveTransportKey(pk);
                     if (tpk) {
                         const events = await this.subscribeP2P(tpk, pk);
-                        const contactList = events.find(e => e.kind === 3);
+                        const contactList = events.find(e => e.kind === Kinds.Contacts);
                         if (contactList) {
                             const fullEventJson = await this.transport.bt.fetch(contactList.magnet);
                             const fullEvent = JSON.parse(fullEventJson.toString());
@@ -113,7 +117,7 @@ export class TransportManager {
                         }
                     }
                 } catch {
-                    // console.warn(`TransportManager: Failed to fetch follows for ${pk}`, e.message);
+                    // logger.warn(`Failed to fetch follows for ${pk}`, e.message);
                 }
             });
 
@@ -126,13 +130,13 @@ export class TransportManager {
      * @returns {Promise<Array>} - Flattened list of latest events from all followed users.
      */
     async subscribeFollowsP2P() {
-        if (!this.wotManager) throw new Error("WoTManager not initialized.");
-        if (!this.feedManager) throw new Error("FeedManager not initialized.");
+        if (!this.wotManager) throw new TransportError("WoTManager not initialized.", "core");
+        if (!this.feedManager) throw new TransportError("FeedManager not initialized.", "core");
 
         const followPubkeys = Array.from(this.wotManager.follows.keys());
         if (followPubkeys.length === 0) return [];
         
-        console.log(`TransportManager: Resolving P2P feeds for ${followPubkeys.length} follows (all degrees)...`);
+        logger.log(`Resolving P2P feeds for ${followPubkeys.length} follows (all degrees)...`);
 
         const allEvents = [];
         const resolvePromises = followPubkeys.map(async (npk) => {
@@ -155,7 +159,7 @@ export class TransportManager {
      * @returns {Promise<string>} - The magnet URI of the updated Index.
      */
     async publishP2P(event) {
-        if (!this.feedManager) throw new Error("FeedManager not initialized.");
+        if (!this.feedManager) throw new TransportError("FeedManager not initialized.", "core");
 
         // 1. Seed the event content itself
         const eventBuffer = this.packager.package(event);
@@ -185,7 +189,7 @@ export class TransportManager {
             const data = JSON.parse(indexBuf.toString());
             return data.items || [];
         } catch (e) {
-            throw new Error(`Failed to fetch or parse P2P index: ${e.message}`);
+            throw new TransportError(`Failed to fetch or parse P2P index: ${e.message}`, "bittorrent");
         }
     }
 
@@ -198,7 +202,7 @@ export class TransportManager {
      */
     async handleIncomingEvent(event) {
         if (this.shouldSeed(event)) {
-            console.log(`TransportManager: Auto-seeding event ${event.id} from followed user ${event.pubkey}`);
+            logger.log(`Auto-seeding event ${event.id} from followed user ${event.pubkey}`);
             return await this.reseedEvent(event);
         }
         return null;
@@ -228,8 +232,7 @@ export class TransportManager {
         try {
             relayStatus = await this.transport.nostr.publish(signedEvent);
         } catch (error) {
-            console.warn("TransportManager: Relay publish failed, but proceeding with P2P seeding.", error.message);
-            relayStatus = 'partial_fail';
+            throw new TransportError(`Relay publish failed: ${error.message}. Seeding aborted.`, "nostr");
         }
 
         const eventBuffer = this.packager.package(signedEvent);
@@ -263,13 +266,13 @@ export class TransportManager {
      * @returns {Promise<string>} - The magnet URI.
      */
     async reseedEvent(event, background = true) {
-        if (!event || !event.id) throw new Error("Invalid event for reseeding.");
+        if (!event || !event.id) throw new TransportError("Invalid event for reseeding.", "core");
 
         if (this.magnetCache.has(event.id)) return this.magnetCache.get(event.id);
-        const existingBt = event.tags?.find(t => t[0] === 'bt');
-        if (existingBt && existingBt[1]) {
-            this.magnetCache.set(event.id, existingBt[1]);
-            return existingBt[1];
+        const existingBt = findTagValue(event, 'bt');
+        if (existingBt) {
+            this.magnetCache.set(event.id, existingBt);
+            return existingBt;
         }
 
         const performSeed = async () => {
@@ -283,13 +286,13 @@ export class TransportManager {
                 }
                 return magnetUri;
             } catch (err) {
-                console.error(`TransportManager: Background seeding failed for ${event.id}:`, err.message);
+                logger.error(`Background seeding failed for ${event.id}:`, err.message);
                 throw err;
             }
         };
 
         if (background) {
-            console.log(`TransportManager: Queuing background seed for ${event.id.substring(0,8)}...`);
+            logger.log(`Queuing background seed for ${event.id.substring(0,8)}...`);
             performSeed().catch(() => {}); 
             return `queued:${event.id}`;
         }
@@ -305,26 +308,23 @@ export class TransportManager {
      * @returns {Promise<Buffer|Stream>}
      */
     async fetchMedia(event) {
-        const btTag = event.tags.find(t => t[0] === 'bt');
-        const urlTag = event.tags.find(t => t[0] === 'url' || t[0] === 'image' || t[0] === 'video');
-
-        const magnet = btTag ? btTag[1] : null;
-        const url = urlTag ? urlTag[1] : null;
+        const magnet = findTagValue(event, 'bt');
+        const url = findTagValue(event, 'url') || findTagValue(event, 'image') || findTagValue(event, 'video');
 
         if (magnet) {
             try {
-                console.log(`TransportManager: Attempting to fetch media via BitTorrent: ${magnet}`);
+                logger.log(`Attempting to fetch media via BitTorrent: ${magnet}`);
                 return await this.transport.bt.fetch(magnet);
             } catch (err) {
-                console.warn("TransportManager: BT fetch failed, trying HTTP fallback...", err);
+                logger.warn("BT fetch failed, trying HTTP fallback...", err);
             }
         }
 
         if (url) {
-            console.log(`TransportManager: Fetching media via HTTP: ${url}`);
+            logger.log(`Fetching media via HTTP: ${url}`);
             return "mock-http-data";
         }
 
-        throw new Error("No media found (neither BT nor HTTP).");
+        throw new TransportError("No media found (neither BT nor HTTP).", "core");
     }
 }

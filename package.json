@@ -1,6 +1,6 @@
 {
   "name": "nostr-over-bt",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "High-performance hybrid transport layer for Nostr using BitTorrent for heavy content and DHT for decentralized discovery.",
   "main": "src/index.js",
   "type": "module",

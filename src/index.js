@@ -14,3 +14,10 @@ export { HybridTransport } from './transport/HybridTransport.js';
 
 // Interfaces
 export { ITransport } from './interfaces/ITransport.js';
+
+// Utilities
+export * from './utils/Errors.js';
+export { logger } from './utils/Logger.js';
+export * from './Constants.js';
+export * from './utils/AsyncUtils.js';
+export * from './utils/TagUtils.js';

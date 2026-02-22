@@ -1,5 +1,4 @@
 import { LRUCache } from 'lru-cache';
-import magnet from 'magnet-uri';
 import { EventPackager } from './EventPackager.js';
 import { FeedTracker } from './FeedTracker.js';
 import { awaitEventWithTimeout } from '../utils/AsyncUtils.js';

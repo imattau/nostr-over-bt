@@ -46,7 +46,7 @@ export class FeedTracker {
                     });
                 }
             }
-        } catch (e) {
+        } catch {
             logger.log("DHT path not available, using Relay Bridge.");
         }
 

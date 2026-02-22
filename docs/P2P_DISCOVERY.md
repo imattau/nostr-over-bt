@@ -3,52 +3,55 @@
 This document outlines the architecture for fully decentralized event discovery using the BitTorrent DHT, removing the hard dependency on Relays for metadata retrieval.
 
 ## Core Concept
-Use **BEP-44 (Mutable Torrents)** to store a "Feed Pointer" in the DHT. This pointer acts as a mutable reference to the user's latest content tree (e.g., a Magnet URI for a "Feed" torrent).
+Use **BEP-44 (Mutable Torrents)** to store a "Feed Pointer" in the DHT. This pointer acts as a mutable reference to the user's latest content tree (an Index file hosted in the BitTorrent Swarm).
 
 ## Architecture
 
 ### 1. Identity Mapping
-To enable deterministic lookups (`Nostr Pubkey` -> `DHT Entry`), we need a strategy to map identities.
-
-**Challenge:** Nostr uses Ed25519 keys with Schnorr signatures. BEP-44 uses Ed25519 keys with standard signatures (or specific DHT node logic). Reusing the exact same keypair across protocols is discouraged for security and compatibility reasons.
+To enable deterministic lookups (`Nostr Pubkey` -> `DHT Entry`), we map identities through a "Transport Key".
 
 **Strategy: Associated Transport Key**
-1.  **Generation:** The client generates a dedicated `Transport Keypair` (Ed25519) for DHT operations.
-2.  **Attestation:** The user publishes a Nostr Event (e.g., Kind 10002 or Custom Kind) signed by their `Nostr Key`, containing the `Transport Public Key`.
-    *   *Note:* This requires one initial Relay lookup to "bootstrap" the identity, OR the user can just use the Transport Key as a "known" alias shared out-of-band.
-3.  **Deterministic Fallback (Optional):** If the client possesses the root seed, they can deterministically derive the `Transport Key` from the same seed using a different derivation path (e.g., `m/44'/.../1'`).
+1.  **Generation:** The `IdentityManager` derives a dedicated `Transport Keypair` (Ed25519) from the user's Nostr secret key.
+2.  **Attestation (Relay Bridge):** The user publishes a Nostr Event (Kind 30078) signed by their `Nostr Key`, containing the `Transport Public Key` in the content field and using the `d` tag `nostr-over-bt-identity`.
+3.  **DHT Record (Native P2P):** The DHT mutable record itself optionally includes the user's `Nostr Pubkey` (`npk`) in its value dictionary.
 
 ### 2. The Mutable Record (BEP-44)
-The DHT record stored at the `Transport Public Key` address contains:
+The DHT record is stored at the `Transport Public Key` address.
 
 *   **`k` (key):** Transport Public Key (32 bytes).
-*   **`seq` (sequence):** Monotonically increasing integer (incremented on update).
+*   **`seq` (sequence):** Monotonically increasing integer.
 *   **`v` (value):** Bencoded dictionary containing:
-    *   `ih` (infohash): SHA1 hash of the latest "Feed Torrent" (20 bytes).
+    *   `ih` (infohash): SHA1 hash of the latest "Feed Index" torrent (20 bytes).
     *   `ts` (timestamp): Unix timestamp of update.
-    *   `ws` (webseeds): Optional list of HTTP fallbacks.
-*   **`sig` (signature):** Ed25519 signature of the payload using the Transport Private Key.
+    *   `npk` (nostr pubkey): Optional associated Nostr public key.
+*   **`sig` (signature):** Ed25519 signature of the payload.
 
-### 3. The Feed Torrent
-The `infohash` in the mutable record points to a **Feed Torrent**. This torrent is a lightweight "Index" file containing:
-*   A list of recent Event IDs.
-*   A list of Magnet URIs for those events (or they are included in this torrent if small).
-*   Merkle root of the user's history?
+### 3. The Feed Index
+The `infohash` points to a **Feed Index** torrent. This torrent contains a lightweight `index.json` file:
+*   `items`: Array of recent events. Each item contains:
+    *   `id`: Nostr event ID.
+    *   `magnet`: Magnet URI for the full event content.
+    *   `ts`: Timestamp of the event.
+    *   `kind`: Nostr event kind.
 
-### 4. Client Workflow
-1.  **Resolve Identity:** User inputs `npub1...`. Client checks local DB or Relay for associated `Transport Key`.
-2.  **DHT Lookup:** Client performs a `dht.get(transport_pubkey)`.
-3.  **Resolve Feed:** DHT returns the mutable record with `latest_infohash`.
-4.  **Join Swarm:** Client joins the swarm for `latest_infohash`.
-5.  **Download Index:** Client downloads the small Index file.
-6.  **Retrieve Events:** Client parses Index, identifies new events, and fetches them (via Swarm or Relay).
+### 4. Client Discovery Workflow
+The `FeedTracker` handles multi-modal discovery:
+
+1.  **DHT Mode (Primary):** Performs `dht.get(transport_pubkey)` to find the latest infohash.
+2.  **Relay Bridge Mode (Fallback/Bootstrap):** Checks for Kind 30078 events with `d` tag `nostr-over-bt-feed` on configured relays. This is essential for web browsers where DHT access might be limited.
+
+## Implementation Details
+
+### `IdentityManager`
+Handles the Ed25519 transport keypair. Uses `tweetnacl` for cross-platform compatibility.
+
+### `FeedManager`
+Manages the sequence numbers and performs the `dht.put` operations. It also constructs the `index.json` payload.
+
+### `FeedTracker`
+Orchestrates the discovery process, trying DHT and Relays in parallel or sequence to resolve a user's current P2P Feed magnet.
 
 ## Advantages
 *   **Relay Resilience:** If relays go down, the "Head" of the user's stream is still resolvable via the DHT.
-*   **Censorship Resistance:** Updates propagate via the P2P layer; no single server can block the "update" of the feed pointer.
-*   **Bandwidth Efficiency:** Relays don't need to push every event; they just need to serve the Identity Bootstrap (which changes rarely).
-
-## Implementation Roadmap
-1.  Add `bittorrent-dht` direct dependency (accessing `put/get` for mutable items).
-2.  Implement `IdentityManager` to handle Transport Key generation/derivation.
-3.  Implement `FeedManager` to manage the "Index Torrent" and update the DHT pointer.
+*   **Censorship Resistance:** Updates propagate via the P2P layer.
+*   **Global WoT Sync:** Enables crawling the social graph without relay rate limits by following the DHT pointers of followed users.

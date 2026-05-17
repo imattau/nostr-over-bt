@@ -15,6 +15,8 @@ import * as nip19 from 'nostr-tools/nip19'
 const AUTH_MODE_KEY = 'terminal_auth_mode'
 const NOSTR_SECRET_KEY = 'terminal_nostr_nsec'
 const TRANSPORT_SECRET_KEY = 'terminal_transport_nsec'
+const PROFILE_CACHE_KEY = 'terminal_profile_cache_v1'
+const FOLLOW_CACHE_PREFIX = 'terminal_follow_cache_v1'
 
 function uniquePush(values, nextValue) {
   if (!nextValue) return values
@@ -65,6 +67,31 @@ function decodeSecretInput(value) {
   return null
 }
 
+function followStorageKey(nostrPubkey) {
+  return nostrPubkey ? `${FOLLOW_CACHE_PREFIX}:${nostrPubkey}` : FOLLOW_CACHE_PREFIX
+}
+
+function loadPersistedFollows(nostrPubkey) {
+  if (typeof localStorage === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(followStorageKey(nostrPubkey))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter(item => typeof item === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function savePersistedFollows(nostrPubkey, follows) {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(followStorageKey(nostrPubkey), JSON.stringify(Array.from(follows)))
+  } catch {
+    // ignore persistence failures
+  }
+}
+
 export function useNostrBT() {
   const [status, setStatus] = useState('initializing')
   const [messages, setMessages] = useState([])
@@ -78,6 +105,7 @@ export function useNostrBT() {
   const [swarmEvents, setSwarmEvents] = useState([])
   const [identity, setIdentity] = useState(null)
   const [activeChannel, setActiveChannel] = useState('global')
+  const [composerExpanded, setComposerExpanded] = useState(false)
   const [follows, setFollows] = useState(new Set())
   const [seeding, setSeeding] = useState([])
   const [authMode, setAuthMode] = useState(() => localStorage.getItem(AUTH_MODE_KEY))
@@ -116,6 +144,7 @@ export function useNostrBT() {
     })
     setSwarmEvents([])
     setIdentity(null)
+    setComposerExpanded(false)
     setFollows(new Set())
     setSeeding([])
     setStatus('locked')
@@ -203,6 +232,11 @@ export function useNostrBT() {
       }
     }))
   }, [])
+
+  useEffect(() => {
+    if (!identity?.nostrPubkey) return
+    savePersistedFollows(identity.nostrPubkey, follows)
+  }, [follows, identity])
 
   const startSession = useCallback(async ({
     mode,
@@ -292,7 +326,10 @@ export function useNostrBT() {
       })
 
       const nostr = new NostrTransport(['wss://relay.damus.io', 'wss://nos.lol'])
-      const profileManager = new ProfileManager(nostr, { onProfile: refreshDisplayName })
+      const profileManager = new ProfileManager(nostr, {
+        onProfile: refreshDisplayName,
+        storageKey: PROFILE_CACHE_KEY
+      })
       const hybrid = new HybridTransport(nostr, bt)
       hybridRef.current = hybrid
 
@@ -302,6 +339,22 @@ export function useNostrBT() {
         wotManager: wot,
         feedManager: feed
       })
+
+      const cachedFollows = loadPersistedFollows(resolvedNostrPubkey)
+      for (const pk of cachedFollows) {
+        wot.addFollow(pk, 1)
+      }
+      setFollows(new Set(cachedFollows))
+
+      wot.refreshFollows(resolvedNostrPubkey)
+        .then(() => {
+          if (!isMounted.current) return
+          const discovered = Array.from(wot.follows.keys()).filter(pk => pk !== resolvedNostrPubkey)
+          setFollows(prev => new Set([...prev, ...discovered]))
+        })
+        .catch((err) => {
+          logSwarmEvent(`wot refresh failed: ${err.message}`, 'warning')
+        })
 
       const onEvent = (event) => {
         if (!isMounted.current) return
@@ -472,7 +525,7 @@ export function useNostrBT() {
     }])
   }, [])
 
-  const publish = useCallback(async (input) => {
+  const publish = useCallback(async (input, files = []) => {
     if (!managerRef.current) return
     if (status !== 'online') {
       setAuthError('Connect with an nsec key or browser extension first.')
@@ -480,19 +533,43 @@ export function useNostrBT() {
     }
 
     const trimmed = input.trim()
-    if (!trimmed) return
+    const mediaFiles = []
+    for (const file of files) {
+      if (!file?.arrayBuffer || !file?.name) continue
+      const buffer = await file.arrayBuffer()
+      mediaFiles.push({ buffer: Buffer.from(buffer), filename: file.name })
+    }
+
+    if (!trimmed && mediaFiles.length === 0) return
 
     if (trimmed.startsWith('/')) {
+      if (mediaFiles.length > 0) {
+        setAuthError('Media attachments are only supported with regular messages.')
+        return
+      }
+
       const [cmd, ...args] = trimmed.split(' ')
       const arg = args.join(' ').trim()
 
       if (cmd === '/help') {
-        addSystemMessage('/follow <npub>\n/relay <add|list>\n/peers\n/clear\n/help')
+        addSystemMessage('/follow <npub>\n/relay <add|list>\n/peers\n/clear\n/expand\n/shrink\n/help')
         return
       }
 
       if (cmd === '/clear') {
         setMessages([])
+        return
+      }
+
+      if (cmd === '/expand') {
+        setComposerExpanded(true)
+        addSystemMessage('Composer expanded. Use Shift+Enter for a newline.')
+        return
+      }
+
+      if (cmd === '/shrink') {
+        setComposerExpanded(false)
+        addSystemMessage('Composer collapsed.')
         return
       }
 
@@ -533,6 +610,9 @@ export function useNostrBT() {
           setFollows(prev => {
             const next = new Set(prev)
             next.add(targetPk)
+            if (identity?.nostrPubkey) {
+              savePersistedFollows(identity.nostrPubkey, next)
+            }
             return next
           })
 
@@ -581,13 +661,14 @@ export function useNostrBT() {
       source: 'hybrid',
       ts: signedEvent.created_at,
       hasBT: true,
+      files: files.map(file => file.name),
       magnetUri: null
     }]
       .sort((a, b) => a.ts - b.ts)
       .slice(-500))
 
     try {
-      const result = await managerRef.current.publish(signedEvent, [])
+      const result = await managerRef.current.publish(signedEvent, mediaFiles)
       if (result?.magnetUri) {
         addSeeding(parseMagnetInfoHash(result.magnetUri))
         logSwarmEvent(`published ${signedEvent.id.slice(0, 12)}`, 'success')
@@ -595,7 +676,7 @@ export function useNostrBT() {
     } catch (err) {
       logSwarmEvent(`publish failed: ${err.message}`, 'error')
     }
-  }, [addSeeding, logSwarmEvent, peers, status])
+  }, [addSeeding, identity, logSwarmEvent, peers, status])
 
   return {
     status,
@@ -610,6 +691,7 @@ export function useNostrBT() {
     identity,
     activeChannel,
     setActiveChannel,
+    composerExpanded,
     follows,
     seeding,
     publish,

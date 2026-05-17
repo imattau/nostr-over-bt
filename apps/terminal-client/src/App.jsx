@@ -86,7 +86,7 @@ const CSS = `
     grid-area: feed;
     min-width: 0;
     display: grid;
-    grid-template-rows: minmax(0, 1fr) 36px;
+    grid-template-rows: minmax(0, 1fr) var(--composer-height, 36px);
     overflow: hidden;
   }
 
@@ -127,6 +127,7 @@ export default function App() {
     identity,
     activeChannel,
     setActiveChannel,
+    composerExpanded,
     follows,
     seeding,
     publish,
@@ -187,13 +188,16 @@ export default function App() {
             peers={peers}
           />
         </div>
-        <div className="feed-shell">
+        <div
+          className="feed-shell"
+          style={{ '--composer-height': composerExpanded ? '132px' : '36px' }}
+        >
           <MessageFeed
             messages={messages}
             activeChannel={activeChannel}
             follows={follows}
           />
-          <CommandInput onSubmit={publish} />
+          <CommandInput onSubmit={publish} expanded={composerExpanded} />
         </div>
         <div className="swarm-panel">
           <SwarmPanel swarmEvents={swarmEvents} stats={stats} seeding={seeding} />

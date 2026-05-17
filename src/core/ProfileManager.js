@@ -11,10 +11,12 @@ export class ProfileManager {
      * @param {NostrTransport} nostrTransport 
      * @param {object} [options={}] - Optional callbacks.
      * @param {function} [options.onProfile] - Called when a profile is fetched and cached.
+     * @param {string} [options.storageKey] - Optional localStorage key for persistent caching.
      */
     constructor(nostrTransport, options = {}) {
         this.nostr = nostrTransport;
         this.onProfile = options.onProfile || null;
+        this.storageKey = options.storageKey || null;
         this.cache = new LRUCache({
             max: Limits.PROFILE_CACHE_SIZE,
             ttl: 1000 * 60 * 60 * 24 // 24 hours
@@ -24,6 +26,8 @@ export class ProfileManager {
         this.batchTimeout = null;
         this.BATCH_INTERVAL = Limits.BATCH_INTERVAL_MS;
         this.MAX_BATCH_SIZE = Limits.MAX_BATCH_SIZE;
+
+        this._loadPersistentCache();
     }
 
     getDisplayName(pubkey) {
@@ -32,6 +36,37 @@ export class ProfileManager {
             return profile.display_name || profile.name || pubkey.substring(0, 8);
         }
         return pubkey.substring(0, 8);
+    }
+
+    _loadPersistentCache() {
+        if (!this.storageKey || typeof localStorage === 'undefined') return;
+
+        try {
+            const raw = localStorage.getItem(this.storageKey);
+            if (!raw) return;
+
+            const entries = JSON.parse(raw);
+            if (!Array.isArray(entries)) return;
+
+            for (const [pubkey, profile] of entries) {
+                if (typeof pubkey === 'string' && profile && typeof profile === 'object') {
+                    this.cache.set(pubkey, profile);
+                }
+            }
+        } catch (err) {
+            logger.warn('Failed to load persistent profile cache.', err.message);
+        }
+    }
+
+    _savePersistentCache() {
+        if (!this.storageKey || typeof localStorage === 'undefined') return;
+
+        try {
+            const entries = Array.from(this.cache.entries());
+            localStorage.setItem(this.storageKey, JSON.stringify(entries));
+        } catch (err) {
+            logger.warn('Failed to save persistent profile cache.', err.message);
+        }
     }
 
     fetchProfile(pubkey) {
@@ -68,14 +103,15 @@ export class ProfileManager {
             kinds: [Kinds.Metadata]
         }, (event) => {
             try {
-            const profile = JSON.parse(event.content);
-            this.cache.set(event.pubkey, profile);
-            this.pending.delete(event.pubkey);
-            if (this.onProfile) {
-                this.onProfile(event.pubkey, profile);
-            }
-        } catch { /* skip */ }
-    });
+                const profile = JSON.parse(event.content);
+                this.cache.set(event.pubkey, profile);
+                this._savePersistentCache();
+                this.pending.delete(event.pubkey);
+                if (this.onProfile) {
+                    this.onProfile(event.pubkey, profile);
+                }
+            } catch { /* skip */ }
+        });
 
         // Close profile sub after 10s to free relay resources
         setTimeout(() => {

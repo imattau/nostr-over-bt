@@ -9,9 +9,12 @@ import { Kinds, Limits } from '../Constants.js';
 export class ProfileManager {
     /**
      * @param {NostrTransport} nostrTransport 
+     * @param {object} [options={}] - Optional callbacks.
+     * @param {function} [options.onProfile] - Called when a profile is fetched and cached.
      */
-    constructor(nostrTransport) {
+    constructor(nostrTransport, options = {}) {
         this.nostr = nostrTransport;
+        this.onProfile = options.onProfile || null;
         this.cache = new LRUCache({
             max: Limits.PROFILE_CACHE_SIZE,
             ttl: 1000 * 60 * 60 * 24 // 24 hours
@@ -65,11 +68,14 @@ export class ProfileManager {
             kinds: [Kinds.Metadata]
         }, (event) => {
             try {
-                const profile = JSON.parse(event.content);
-                this.cache.set(event.pubkey, profile);
-                this.pending.delete(event.pubkey);
-            } catch { /* skip */ }
-        });
+            const profile = JSON.parse(event.content);
+            this.cache.set(event.pubkey, profile);
+            this.pending.delete(event.pubkey);
+            if (this.onProfile) {
+                this.onProfile(event.pubkey, profile);
+            }
+        } catch { /* skip */ }
+    });
 
         // Close profile sub after 10s to free relay resources
         setTimeout(() => {

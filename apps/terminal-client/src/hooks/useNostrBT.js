@@ -17,6 +17,7 @@ const NOSTR_SECRET_KEY = 'terminal_nostr_nsec'
 const TRANSPORT_SECRET_KEY = 'terminal_transport_nsec'
 const PROFILE_CACHE_KEY = 'terminal_profile_cache_v1'
 const FOLLOW_CACHE_PREFIX = 'terminal_follow_cache_v1'
+const BLOCK_CACHE_PREFIX = 'terminal_block_cache_v1'
 
 function uniquePush(values, nextValue) {
   if (!nextValue) return values
@@ -41,6 +42,12 @@ function parseMagnetInfoHash(magnetUri) {
   if (!magnetUri) return null
   const match = magnetUri.match(/[?&]xt=urn:btih:([^&]+)/i)
   return match ? match[1] : null
+}
+
+function getReplyParentId(event) {
+  if (!event?.tags) return null
+  const replyTag = event.tags.find(tag => tag[0] === 'e')
+  return replyTag ? replyTag[1] : null
 }
 
 function isExtensionAvailable() {
@@ -71,6 +78,10 @@ function followStorageKey(nostrPubkey) {
   return nostrPubkey ? `${FOLLOW_CACHE_PREFIX}:${nostrPubkey}` : FOLLOW_CACHE_PREFIX
 }
 
+function blockStorageKey(nostrPubkey) {
+  return nostrPubkey ? `${BLOCK_CACHE_PREFIX}:${nostrPubkey}` : BLOCK_CACHE_PREFIX
+}
+
 function loadPersistedFollows(nostrPubkey) {
   if (typeof localStorage === 'undefined') return []
   try {
@@ -92,6 +103,27 @@ function savePersistedFollows(nostrPubkey, follows) {
   }
 }
 
+function loadPersistedBlockedPubkeys(nostrPubkey) {
+  if (typeof localStorage === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(blockStorageKey(nostrPubkey))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter(item => typeof item === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function savePersistedBlockedPubkeys(nostrPubkey, pubkeys) {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(blockStorageKey(nostrPubkey), JSON.stringify(Array.from(pubkeys)))
+  } catch {
+    // ignore persistence failures
+  }
+}
+
 export function useNostrBT() {
   const [status, setStatus] = useState('initializing')
   const [messages, setMessages] = useState([])
@@ -106,7 +138,9 @@ export function useNostrBT() {
   const [identity, setIdentity] = useState(null)
   const [activeChannel, setActiveChannel] = useState('global')
   const [composerExpanded, setComposerExpanded] = useState(false)
+  const [replyTarget, setReplyTarget] = useState(null)
   const [follows, setFollows] = useState(new Set())
+  const [blockedPubkeys, setBlockedPubkeys] = useState(new Set())
   const [seeding, setSeeding] = useState([])
   const [authMode, setAuthMode] = useState(() => localStorage.getItem(AUTH_MODE_KEY))
   const [authError, setAuthError] = useState('')
@@ -145,7 +179,9 @@ export function useNostrBT() {
     setSwarmEvents([])
     setIdentity(null)
     setComposerExpanded(false)
+    setReplyTarget(null)
     setFollows(new Set())
+    setBlockedPubkeys(new Set())
     setSeeding([])
     setStatus('locked')
   }, [])
@@ -193,6 +229,8 @@ export function useNostrBT() {
         author: authorOverride || fallbackAuthor,
         pubkey: event.pubkey,
         content: event.content,
+        tags: Array.isArray(event.tags) ? event.tags : [],
+        replyTo: getReplyParentId(event),
         source,
         ts: event.created_at,
         hasBT,
@@ -237,6 +275,11 @@ export function useNostrBT() {
     if (!identity?.nostrPubkey) return
     savePersistedFollows(identity.nostrPubkey, follows)
   }, [follows, identity])
+
+  useEffect(() => {
+    if (!identity?.nostrPubkey) return
+    savePersistedBlockedPubkeys(identity.nostrPubkey, blockedPubkeys)
+  }, [blockedPubkeys, identity])
 
   const startSession = useCallback(async ({
     mode,
@@ -345,6 +388,7 @@ export function useNostrBT() {
         wot.addFollow(pk, 1)
       }
       setFollows(new Set(cachedFollows))
+      setBlockedPubkeys(new Set(loadPersistedBlockedPubkeys(resolvedNostrPubkey)))
 
       wot.refreshFollows(resolvedNostrPubkey)
         .then(() => {
@@ -543,6 +587,8 @@ export function useNostrBT() {
     if (!trimmed && mediaFiles.length === 0) return
 
     if (trimmed.startsWith('/')) {
+      setReplyTarget(null)
+
       if (mediaFiles.length > 0) {
         setAuthError('Media attachments are only supported with regular messages.')
         return
@@ -651,6 +697,14 @@ export function useNostrBT() {
       content: trimmed,
       tags: []
     }
+
+    if (replyTarget?.id) {
+      eventTemplate.tags.push(['e', replyTarget.id, '', 'reply'])
+      if (replyTarget.pubkey) {
+        eventTemplate.tags.push(['p', replyTarget.pubkey])
+      }
+    }
+
     const signedEvent = await signEventRef.current(eventTemplate)
 
     setMessages(prev => [...prev, {
@@ -675,8 +729,53 @@ export function useNostrBT() {
       }
     } catch (err) {
       logSwarmEvent(`publish failed: ${err.message}`, 'error')
+    } finally {
+      setReplyTarget(null)
     }
-  }, [addSeeding, identity, logSwarmEvent, peers, status])
+  }, [addSeeding, identity, logSwarmEvent, peers, replyTarget, status])
+
+  const toggleBlockedPubkey = useCallback((pubkey) => {
+    if (!pubkey) return
+
+    setBlockedPubkeys(prev => {
+      const next = new Set(prev)
+      if (next.has(pubkey)) {
+        next.delete(pubkey)
+      } else {
+        next.add(pubkey)
+      }
+
+      if (identity?.nostrPubkey) {
+        savePersistedBlockedPubkeys(identity.nostrPubkey, next)
+      }
+
+      return next
+    })
+  }, [identity])
+
+  const reportMessage = useCallback(async (message, reason = 'spam') => {
+    if (!managerRef.current || status !== 'online') return false
+    if (!message?.id || !message?.pubkey) return false
+
+    try {
+      const reportEvent = await signEventRef.current({
+        kind: 1984,
+        created_at: Math.floor(Date.now() / 1000),
+        content: reason,
+        tags: [
+          ['e', message.id],
+          ['p', message.pubkey]
+        ]
+      })
+
+      await managerRef.current.publish(reportEvent)
+      addSystemMessage(`Reported ${normalizePubkey(message.pubkey) || message.pubkey.slice(0, 8)}.`)
+      return true
+    } catch (err) {
+      addSystemMessage(`Report failed: ${err.message}`)
+      return false
+    }
+  }, [addSystemMessage, status])
 
   return {
     status,
@@ -692,6 +791,11 @@ export function useNostrBT() {
     activeChannel,
     setActiveChannel,
     composerExpanded,
+    replyTarget,
+    setReplyTarget,
+    blockedPubkeys,
+    toggleBlockedPubkey,
+    reportMessage,
     follows,
     seeding,
     publish,

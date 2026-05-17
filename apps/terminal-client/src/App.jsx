@@ -7,6 +7,7 @@ import CommandInput from './components/CommandInput.jsx'
 import SwarmPanel from './components/SwarmPanel.jsx'
 import LoginScreen from './components/LoginScreen.jsx'
 import AccountMenu from './components/AccountMenu.jsx'
+import PostContextMenu from './components/PostContextMenu.jsx'
 
 const CSS = `
   :root {
@@ -114,6 +115,9 @@ const CSS = `
 
 export default function App() {
   const [showAccountMenu, setShowAccountMenu] = useState(false)
+  const [postMenu, setPostMenu] = useState(null)
+  const [focusedMessageId, setFocusedMessageId] = useState(null)
+  const [composerHeight, setComposerHeight] = useState(36)
   const {
     status,
     authMode,
@@ -128,6 +132,11 @@ export default function App() {
     activeChannel,
     setActiveChannel,
     composerExpanded,
+    replyTarget,
+    setReplyTarget,
+    blockedPubkeys,
+    toggleBlockedPubkey,
+    reportMessage,
     follows,
     seeding,
     publish,
@@ -142,6 +151,107 @@ export default function App() {
     }
   }, [identity, status])
 
+  useEffect(() => {
+    setPostMenu(null)
+  }, [activeChannel, identity])
+
+  useEffect(() => {
+    setFocusedMessageId(null)
+    setReplyTarget(null)
+  }, [activeChannel, identity, setReplyTarget])
+
+  const closePostMenu = () => setPostMenu(null)
+
+  const copyText = async (text) => {
+    if (!text) return
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+        return
+      }
+
+      const el = document.createElement('textarea')
+      el.value = text
+      el.setAttribute('readonly', '')
+      el.style.position = 'fixed'
+      el.style.left = '-9999px'
+      document.body.appendChild(el)
+      el.select()
+      document.execCommand('copy')
+      document.body.removeChild(el)
+    } catch {
+      // ignore clipboard failures
+    }
+  }
+
+  const openPostMenu = (message, event) => {
+    if (!message || message.source === 'system') return
+    event.preventDefault()
+
+    const menuWidth = 248
+    const menuHeight = 256
+    const pad = 8
+    const x = Math.max(pad, Math.min(event.clientX, window.innerWidth - menuWidth - pad))
+    const y = Math.max(pad, Math.min(event.clientY, window.innerHeight - menuHeight - pad))
+
+    setPostMenu({ message, x, y })
+  }
+
+  const activeMenuMessage = postMenu?.message || null
+  const activeMenuBlocked = Boolean(activeMenuMessage?.pubkey && blockedPubkeys.has(activeMenuMessage.pubkey))
+  const focusedMessage = focusedMessageId ? messages.find(message => message.id === focusedMessageId) || null : null
+
+  const handleFocusMessage = (message) => {
+    if (!message || message.source === 'system') return
+    setFocusedMessageId(message.id)
+    setReplyTarget(message)
+  }
+
+  const clearFocusedThread = () => {
+    setFocusedMessageId(null)
+    setReplyTarget(null)
+  }
+
+  const handleReply = () => {
+    if (!activeMenuMessage) return
+    setReplyTarget(activeMenuMessage)
+    closePostMenu()
+  }
+
+  const handleToggleBlock = () => {
+    if (!activeMenuMessage?.pubkey) return
+    toggleBlockedPubkey(activeMenuMessage.pubkey)
+    if (focusedMessage?.pubkey && focusedMessage.pubkey === activeMenuMessage.pubkey) {
+      clearFocusedThread()
+    }
+    closePostMenu()
+  }
+
+  const handleReport = async () => {
+    if (!activeMenuMessage) return
+    await reportMessage(activeMenuMessage)
+    closePostMenu()
+  }
+
+  const handleCopyPubkey = async () => {
+    if (!activeMenuMessage?.pubkey) return
+    await copyText(activeMenuMessage.pubkey)
+    closePostMenu()
+  }
+
+  const handleCopyEventId = async () => {
+    if (!activeMenuMessage?.id) return
+    await copyText(activeMenuMessage.id)
+    closePostMenu()
+  }
+
+  const handleOpenNjump = () => {
+    if (!activeMenuMessage?.id) return
+    window.open(`https://njump.me/${activeMenuMessage.id}`, '_blank', 'noopener,noreferrer')
+    closePostMenu()
+  }
+
   if (status === 'initializing' && !identity && !showAccountMenu) {
     return (
       <>
@@ -153,7 +263,7 @@ export default function App() {
     )
   }
 
-  if (!identity && !authMode && !showAccountMenu) {
+  if (!identity && !showAccountMenu) {
     return (
       <LoginScreen
         authMode={authMode}
@@ -190,14 +300,25 @@ export default function App() {
         </div>
         <div
           className="feed-shell"
-          style={{ '--composer-height': composerExpanded ? '132px' : '36px' }}
+          style={{ '--composer-height': `${composerHeight}px` }}
         >
           <MessageFeed
             messages={messages}
             activeChannel={activeChannel}
             follows={follows}
+            blockedPubkeys={blockedPubkeys}
+            onContextMenu={openPostMenu}
+            focusedMessageId={focusedMessageId}
+            onFocusMessage={handleFocusMessage}
+            onClearFocusedThread={clearFocusedThread}
           />
-          <CommandInput onSubmit={publish} expanded={composerExpanded} />
+          <CommandInput
+            onSubmit={publish}
+            expanded={composerExpanded}
+            replyTarget={replyTarget}
+            onClearReplyTarget={() => setReplyTarget(null)}
+            onHeightChange={setComposerHeight}
+          />
         </div>
         <div className="swarm-panel">
           <SwarmPanel swarmEvents={swarmEvents} stats={stats} seeding={seeding} />
@@ -213,6 +334,21 @@ export default function App() {
           onRefreshExtension={refreshExtensionAvailability}
           onConnectExtension={connectWithExtension}
           onConnectNsec={connectWithNsec}
+        />
+      ) : null}
+      {postMenu ? (
+        <PostContextMenu
+          message={activeMenuMessage}
+          x={postMenu.x}
+          y={postMenu.y}
+          isBlocked={activeMenuBlocked}
+          onClose={closePostMenu}
+          onReply={handleReply}
+          onToggleBlock={handleToggleBlock}
+          onReport={handleReport}
+          onCopyPubkey={handleCopyPubkey}
+          onCopyEventId={handleCopyEventId}
+          onOpenNjump={handleOpenNjump}
         />
       ) : null}
     </>

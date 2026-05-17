@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const CSS = `
   .cmd-input-wrap {
@@ -37,6 +37,35 @@ const CSS = `
     gap: 6px;
     padding: 6px 0;
     align-self: stretch;
+  }
+  .cmd-reply {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border: 1px solid rgba(97, 167, 255, 0.25);
+    background: rgba(97, 167, 255, 0.08);
+    color: var(--text-dim);
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+  .cmd-reply strong {
+    color: var(--blue);
+    font-weight: 600;
+    margin-right: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .cmd-reply button {
+    border: none;
+    background: transparent;
+    color: var(--blue);
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+  }
+  .cmd-reply button:hover {
+    color: var(--yellow);
   }
   .cmd-attachments {
     display: flex;
@@ -110,14 +139,41 @@ function dedupeFiles(files) {
   return next
 }
 
-export default function CommandInput({ onSubmit, expanded = false }) {
+export default function CommandInput({
+  onSubmit,
+  expanded = false,
+  replyTarget = null,
+  onClearReplyTarget,
+  onHeightChange
+}) {
   const [value, setValue] = useState('')
   const [history, setHistory] = useState([])
   const [historyIdx, setHistoryIdx] = useState(-1)
   const [attachedFiles, setAttachedFiles] = useState([])
   const [isDragging, setIsDragging] = useState(false)
   const inputRef = useRef(null)
+  const wrapRef = useRef(null)
   const dragDepthRef = useRef(0)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [replyTarget, expanded])
+
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el || !onHeightChange) return
+
+    const report = () => {
+      onHeightChange(Math.ceil(el.getBoundingClientRect().height))
+    }
+
+    report()
+
+    const observer = new ResizeObserver(report)
+    observer.observe(el)
+
+    return () => observer.disconnect()
+  }, [onHeightChange, replyTarget, expanded, attachedFiles.length])
 
   const addFiles = (incomingFiles) => {
     setAttachedFiles(prev => dedupeFiles([...prev, ...incomingFiles]))
@@ -201,6 +257,7 @@ export default function CommandInput({ onSubmit, expanded = false }) {
     <>
       <style>{CSS}</style>
       <div
+        ref={wrapRef}
         className={`cmd-input-wrap ${isDragging ? 'dragging' : ''}`}
         onClick={() => inputRef.current?.focus()}
         onDragEnter={handleDragEnter}
@@ -211,6 +268,17 @@ export default function CommandInput({ onSubmit, expanded = false }) {
         {isDragging ? <div className="cmd-drop-cover">drop to attach</div> : null}
         <span className="cmd-prompt">{'>'}</span>
         <div className="cmd-input-stack">
+          {replyTarget ? (
+            <div className="cmd-reply">
+              <span title={replyTarget.content || replyTarget.id}>
+                <strong>reply mode</strong>
+                replying to {replyTarget.author || replyTarget.pubkey?.slice(0, 8) || 'post'}
+              </span>
+              <button type="button" onClick={onClearReplyTarget} aria-label="Clear reply target">
+                clear
+              </button>
+            </div>
+          ) : null}
           {attachedFiles.length > 0 ? (
             <div className="cmd-attachments">
               {attachedFiles.map((file, index) => (
@@ -231,9 +299,11 @@ export default function CommandInput({ onSubmit, expanded = false }) {
             onKeyDown={handleKeyDown}
             placeholder={
               expanded
-                ? (attachedFiles.length > 0
-                  ? 'enter to send, shift+enter for a newline'
-                  : 'type a message, /help, or shift+enter for a newline')
+                ? (replyTarget
+                  ? 'enter to send a reply, shift+enter for a newline'
+                  : attachedFiles.length > 0
+                    ? 'enter to send, shift+enter for a newline'
+                    : 'type a message, /help, or shift+enter for a newline')
                 : (attachedFiles.length > 0
                   ? 'press enter to send with attachments'
                   : 'type a message or /help')
@@ -243,6 +313,10 @@ export default function CommandInput({ onSubmit, expanded = false }) {
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
+            style={{
+              minHeight: expanded ? '92px' : '20px',
+              maxHeight: expanded ? '160px' : '72px'
+            }}
           />
         </div>
       </div>

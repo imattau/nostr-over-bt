@@ -489,9 +489,12 @@ remove_managed_caddy_blocks() {
 
 ensure_caddy_dropin_import() {
   local caddyfile="$1"
-  local dropin_glob="$2"
+  local dropin_dir="$2"
+  local dropin_glob="$dropin_dir/*.caddy"
+  local dropin_dir_pattern
+  dropin_dir_pattern="$(escape_ere "$dropin_dir")"
 
-  if grep -qF "$dropin_glob" "$caddyfile"; then
+  if grep -Eq "^[[:space:]]*import[[:space:]]+$dropin_dir_pattern(/|\*|[[:space:]]|$)" "$caddyfile"; then
     return 0
   fi
 
@@ -517,7 +520,7 @@ write_caddy_dropin_config() {
 
   install -d -m 0755 "$dropin_dir"
   remove_managed_caddy_blocks "$caddyfile"
-  ensure_caddy_dropin_import "$caddyfile" "$dropin_dir/*.caddy"
+  ensure_caddy_dropin_import "$caddyfile" "$dropin_dir"
 
   local dropin_file="$dropin_dir/$SITE_NAME.caddy"
   cat > "$dropin_file" <<EOF

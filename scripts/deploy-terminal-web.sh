@@ -22,7 +22,7 @@ PROXY_TYPE=""
 FORCE_RECONFIGURE=0
 
 log() {
-  printf '[deploy-terminal] %s\n' "$*"
+  printf '[deploy-terminal] %s\n' "$*" >&2
 }
 
 warn() {

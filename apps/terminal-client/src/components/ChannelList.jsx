@@ -12,6 +12,7 @@ const CSS = `
     overflow-y: auto;
   }
   .chanlist-section {
+    flex-shrink: 0;
     padding: 4px 8px;
     font-size: 10px;
     color: var(--text-dim);
@@ -20,10 +21,12 @@ const CSS = `
     margin-top: 8px;
   }
   .channel-item {
+    flex-shrink: 0;
     padding: 3px 12px;
     cursor: pointer;
     color: var(--text-dim);
     font-size: 12px;
+    line-height: 1.5;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -39,8 +42,10 @@ const CSS = `
     border-left-color: var(--blue);
   }
   .peer-item {
+    flex-shrink: 0;
     padding: 2px 12px;
     font-size: 11px;
+    line-height: 1.5;
     color: var(--text-dim);
     white-space: nowrap;
     overflow: hidden;
@@ -51,6 +56,7 @@ const CSS = `
     content: '· ';
   }
   .follow-item {
+    flex-shrink: 0;
     padding: 4px 12px 5px;
     font-size: 11px;
     color: var(--text-dim);

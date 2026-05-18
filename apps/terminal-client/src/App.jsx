@@ -285,20 +285,20 @@ export default function App() {
     onToggleFullscreen: toggleFullscreen
   })
 
+  const PHONE_PANES = ['channels', 'feed', 'swarm']
+
   const { onTouchStart, onTouchEnd } = useSwipe({
     onSwipeLeft: () => {
-      const panes = ['feed', 'swarm', 'channels']
-      const index = panes.indexOf(activePane)
-      setActivePane(panes[(index + 1) % panes.length])
+      const index = PHONE_PANES.indexOf(activePane)
+      setActivePane(PHONE_PANES[(index + 1) % PHONE_PANES.length])
     },
     onSwipeRight: () => {
-      const panes = ['feed', 'swarm', 'channels']
-      const index = panes.indexOf(activePane)
-      setActivePane(panes[(index + panes.length - 1) % panes.length])
+      const index = PHONE_PANES.indexOf(activePane)
+      setActivePane(PHONE_PANES[(index + PHONE_PANES.length - 1) % PHONE_PANES.length])
     }
   })
 
-  const paneIndex = { feed: 0, swarm: 1, channels: 2 }[activePane] ?? 0
+  const paneIndex = { channels: 0, feed: 1, swarm: 2 }[activePane] ?? 1
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -385,13 +385,16 @@ export default function App() {
       .sort((a, b) => a.localeCompare(b))
       .map(pubkey => {
         const latest = byPubkey.get(pubkey)
-        const label = latest?.author || (() => {
+        const candidate = latest?.author || ''
+        const label = candidate && !candidate.startsWith('npub1') && !candidate.startsWith('note1')
+          ? candidate
+          : (() => {
           try {
             return nip19.npubEncode(pubkey).slice(0, 12)
           } catch {
             return pubkey.slice(0, 12)
           }
-        })()
+          })()
 
         return {
           pubkey,

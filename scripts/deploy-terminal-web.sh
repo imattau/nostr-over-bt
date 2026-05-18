@@ -372,24 +372,27 @@ find_caddy_dropin_dir() {
 }
 
 get_caddy_main_file() {
+  local exec_start=""
+  if command -v systemctl >/dev/null 2>&1; then
+    exec_start="$(systemctl show caddy -p ExecStart --value 2>/dev/null || true)"
+    if [[ "$exec_start" =~ --config[[:space:]]+([^[:space:]]+) ]]; then
+      printf '%s\n' "${BASH_REMATCH[1]}"
+      return 0
+    fi
+  fi
+
   find_caddyfile
 }
 
 find_caddy_config_files() {
   local files=()
-  local candidate
-
-  for candidate in /etc/caddy/Caddyfile /etc/caddy/caddyfile; do
-    [[ -f "$candidate" ]] && files+=("$candidate")
-  done
-
-  for candidate in /etc/caddy/conf.d /etc/caddy/sites.d /etc/caddy/Caddyfile.d /etc/caddy.d; do
-    if [[ -d "$candidate" ]]; then
-      while IFS= read -r -d '' file; do
-        files+=("$file")
-      done < <(find "$candidate" -maxdepth 1 -type f \( -name '*.caddy' -o -name 'Caddyfile' -o -name '*.conf' \) -print0 2>/dev/null)
-    fi
-  done
+  while IFS= read -r -d '' file; do
+    files+=("$file")
+  done < <(
+    find /etc/caddy -type f \
+      \( -name 'Caddyfile' -o -name 'caddyfile' -o -name '*.caddy' -o -name '*.conf' -o -name '*.json' \) \
+      -print0 2>/dev/null
+  )
 
   printf '%s\n' "${files[@]}"
 }
@@ -510,7 +513,7 @@ write_caddy_dropin_config() {
   local dropin_dir
   dropin_dir="$(find_caddy_dropin_dir)" || die "No supported Caddy drop-in directory found."
   local caddyfile
-  caddyfile="$(find_caddyfile)" || die "Could not locate a Caddyfile under /etc/caddy."
+  caddyfile="$(get_caddy_main_file)" || die "Could not locate the active Caddy config file."
 
   install -d -m 0755 "$dropin_dir"
   remove_managed_caddy_blocks "$caddyfile"
@@ -614,7 +617,7 @@ write_caddy_config() {
   fi
 
   local caddyfile
-  caddyfile="$(find_caddyfile)" || die "Could not locate a Caddyfile under /etc/caddy."
+  caddyfile="$(get_caddy_main_file)" || die "Could not locate the active Caddy config file."
   log "Using inline Caddyfile: $caddyfile"
   remove_managed_caddy_blocks "$caddyfile"
   write_caddy_inline_config "$caddyfile"

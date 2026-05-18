@@ -33,6 +33,7 @@ const CSS = `
 
   html, body, #root {
     height: 100%;
+    width: 100%;
   }
 
   body {
@@ -71,6 +72,7 @@ const CSS = `
       'status'
       'main';
     height: 100vh;
+    height: 100dvh;
     overflow: hidden;
   }
 
@@ -160,6 +162,8 @@ const CSS = `
         'status'
         'main'
         'mobile-nav';
+      height: 100vh;
+      height: 100dvh;
     }
 
     .main-stage {
@@ -192,6 +196,7 @@ const CSS = `
 
     .mobile-nav-bar {
       display: block;
+      padding-bottom: env(safe-area-inset-bottom, 0px);
     }
   }
 
@@ -217,6 +222,7 @@ export default function App() {
   const [composerHeight, setComposerHeight] = useState(36)
   const [activePane, setActivePane] = useState('feed')
   const [showSwarm, setShowSwarm] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement))
   const {
     status,
     authMode,
@@ -261,6 +267,15 @@ export default function App() {
   })
 
   const paneIndex = { feed: 0, swarm: 1, channels: 2 }[activePane] ?? 0
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement))
+    }
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  }, [])
 
   useEffect(() => {
     if (status === 'online' && identity) {
@@ -395,6 +410,19 @@ export default function App() {
     closePostMenu()
   }
 
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen()
+        return
+      }
+
+      await document.documentElement.requestFullscreen?.()
+    } catch {
+      // ignore fullscreen failures
+    }
+  }
+
   const handleOpenNjump = () => {
     if (!activeMenuMessage?.id) return
     window.open(`https://njump.me/${activeMenuMessage.id}`, '_blank', 'noopener,noreferrer')
@@ -440,6 +468,8 @@ export default function App() {
             onAccountSwitch={() => setShowAccountMenu(true)}
             showSwarmToggle={showSwarm}
             onToggleSwarm={() => setShowSwarm(value => !value)}
+            onToggleFullscreen={toggleFullscreen}
+            fullscreenActive={isFullscreen}
           />
         </div>
         <div

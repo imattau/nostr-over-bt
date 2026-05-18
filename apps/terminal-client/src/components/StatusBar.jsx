@@ -7,7 +7,7 @@ const CSS = `
     display: flex;
     align-items: center;
     gap: 16px;
-    padding: 0 12px;
+    padding: 0 calc(12px + env(safe-area-inset-right, 0px)) 0 calc(12px + env(safe-area-inset-left, 0px));
     height: 28px;
     font-size: 12px;
     color: var(--text-dim);
@@ -76,6 +76,19 @@ const CSS = `
     color: var(--text);
     border-color: var(--yellow);
   }
+  .statusbar .fullscreen-toggle {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    font: inherit;
+    font-size: 11px;
+    padding: 2px 8px;
+    cursor: pointer;
+  }
+  .statusbar .fullscreen-toggle:hover {
+    color: var(--text);
+    border-color: var(--blue);
+  }
   .statusbar .pubkey {
     color: var(--text);
     overflow: hidden;
@@ -106,7 +119,9 @@ export default function StatusBar({
   onLogout,
   onAccountSwitch,
   showSwarmToggle = false,
-  onToggleSwarm
+  onToggleSwarm,
+  onToggleFullscreen,
+  fullscreenActive = false
 }) {
   const isOnline = status === 'online'
 
@@ -129,6 +144,11 @@ export default function StatusBar({
         {onToggleSwarm ? (
           <button type="button" className="swarm-toggle" onClick={onToggleSwarm} aria-pressed={showSwarmToggle}>
             {showSwarmToggle ? 'hide swarm' : 'swarm'}
+          </button>
+        ) : null}
+        {onToggleFullscreen ? (
+          <button type="button" className="fullscreen-toggle" onClick={onToggleFullscreen} aria-pressed={fullscreenActive}>
+            {fullscreenActive ? 'exit full' : 'full screen'}
           </button>
         ) : null}
         {onLogout ? (

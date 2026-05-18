@@ -34,6 +34,11 @@ die() {
   exit 1
 }
 
+require_command() {
+  local command_name="$1"
+  command -v "$command_name" >/dev/null 2>&1 || die "Required command not found: $command_name"
+}
+
 ensure_root() {
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     exec sudo -E bash "$SCRIPT_PATH" "$@"
@@ -366,6 +371,10 @@ find_caddy_dropin_dir() {
   return 1
 }
 
+get_caddy_main_file() {
+  find_caddyfile
+}
+
 find_caddy_config_files() {
   local files=()
   local candidate
@@ -530,6 +539,72 @@ get_caddy_target_file() {
   find_caddyfile
 }
 
+verify_url_response() {
+  local url="$1"
+  local label="$2"
+  local resolve_host="${3:-}"
+  local attempts=12
+  local attempt=1
+  local curl_args=(
+    --fail
+    --silent
+    --show-error
+    --max-time 10
+  )
+
+  require_command curl
+
+  if [[ -n "$resolve_host" ]]; then
+    curl_args+=(--resolve "$resolve_host")
+  fi
+
+  while (( attempt <= attempts )); do
+    if curl "${curl_args[@]}" "$url" >/dev/null; then
+      log "Verified $label at $url"
+      return 0
+    fi
+    sleep 2
+    ((attempt++))
+  done
+
+  die "Could not verify $label at $url"
+}
+
+reload_proxy_service() {
+  local service_name="$1"
+
+  if systemctl reload "$service_name" 2>/dev/null; then
+    return 0
+  fi
+
+  warn "Reload failed for $service_name; attempting restart."
+  if systemctl restart "$service_name"; then
+    return 0
+  fi
+
+  warn "$service_name failed to restart. Current status:"
+  systemctl --no-pager --full status "$service_name" >&2 || true
+  if command -v journalctl >/dev/null 2>&1; then
+    warn "Recent journal lines for $service_name:"
+    journalctl -u "$service_name" -n 50 --no-pager >&2 || true
+  fi
+  die "$service_name could not be reloaded or restarted."
+}
+
+verify_deployment() {
+  local service_name="$1"
+
+  case "$service_name" in
+    caddy)
+      verify_url_response "http://$DOMAIN/" "HTTP endpoint" "$DOMAIN:80:127.0.0.1"
+      verify_url_response "https://$DOMAIN/" "HTTPS endpoint" "$DOMAIN:443:127.0.0.1"
+      ;;
+    nginx|apache)
+      verify_url_response "http://$DOMAIN/" "HTTP endpoint" "$DOMAIN:80:127.0.0.1"
+      ;;
+  esac
+}
+
 write_caddy_config() {
   local dropin_dir=""
   if dropin_dir="$(find_caddy_dropin_dir)"; then
@@ -549,7 +624,7 @@ validate_and_reload() {
   local service_name="$1"
   case "$service_name" in
     caddy)
-      local target_file conflicts
+      local target_file validation_file conflicts
       target_file="$(get_caddy_target_file)"
       if conflicts="$(check_caddy_domain_conflicts "$DOMAIN" "$target_file")"; then
         warn "Detected multiple Caddy site definitions for $DOMAIN:"
@@ -560,15 +635,18 @@ validate_and_reload() {
         die "Refusing to apply config because the domain is already defined more than once."
       fi
       target_file="$(write_caddy_config)"
-      log "Validating Caddy configuration at $target_file"
-      caddy validate --config "$target_file" --adapter caddyfile
-      systemctl reload caddy 2>/dev/null || systemctl restart caddy
+      validation_file="$(get_caddy_main_file)"
+      log "Validating Caddy configuration at $validation_file"
+      caddy validate --config "$validation_file" --adapter caddyfile
+      reload_proxy_service caddy
+      verify_deployment caddy
       ;;
     nginx)
       write_nginx_config
       log "Validating nginx configuration"
       nginx -t
-      systemctl reload nginx 2>/dev/null || systemctl restart nginx
+      reload_proxy_service nginx
+      verify_deployment nginx
       ;;
     apache)
       local apache_service
@@ -579,7 +657,8 @@ validate_and_reload() {
       else
         apachectl configtest
       fi
-      systemctl reload "$apache_service" 2>/dev/null || systemctl restart "$apache_service"
+      reload_proxy_service "$apache_service"
+      verify_deployment apache
       ;;
     *)
       die "Unknown proxy type: $service_name"

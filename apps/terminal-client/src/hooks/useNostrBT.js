@@ -8,7 +8,8 @@ import {
   ProfileManager,
   RelayListManager,
   WoTManager,
-  FeedManager
+  FeedManager,
+  Kinds
 } from 'nostr-over-bt'
 import { finalizeEvent, getPublicKey, generateSecretKey } from 'nostr-tools/pure'
 import * as nip19 from 'nostr-tools/nip19'
@@ -229,6 +230,33 @@ function savePersistedBlockedPubkeys(nostrPubkey, pubkeys) {
   }
 }
 
+function parseMuteListPubkeys(event) {
+  if (!event?.tags) return []
+  return event.tags
+    .filter(tag => tag[0] === 'p' && tag[1])
+    .map(tag => tag[1])
+}
+
+function buildMuteListEventTemplate(blockedPubkeys) {
+  const tags = Array.from(new Set(Array.from(blockedPubkeys || [])))
+    .filter(pubkey => typeof pubkey === 'string' && pubkey.length > 0)
+    .sort()
+    .map(pubkey => ['p', pubkey])
+
+  return {
+    kind: Kinds.MuteList,
+    created_at: Math.floor(Date.now() / 1000),
+    content: '',
+    tags
+  }
+}
+
+function pickLatestEvent(events) {
+  return Array.isArray(events) && events.length > 0
+    ? events.slice().sort((a, b) => (b.created_at - a.created_at) || b.id.localeCompare(a.id))[0]
+    : null
+}
+
 export function useNostrBT(options = {}) {
   const {
     onToggleFullscreen = null
@@ -260,6 +288,7 @@ export function useNostrBT(options = {}) {
   const hybridRef = useRef(null)
   const relayListManagerRef = useRef(null)
   const subscriptionRef = useRef(null)
+  const muteListSubscriptionRef = useRef(null)
   const intervalRef = useRef(null)
   const signEventRef = useRef(async () => {
     throw new Error('Not authenticated')
@@ -308,6 +337,11 @@ export function useNostrBT(options = {}) {
       subscriptionRef.current.close()
     }
     subscriptionRef.current = null
+
+    if (muteListSubscriptionRef.current?.close) {
+      muteListSubscriptionRef.current.close()
+    }
+    muteListSubscriptionRef.current = null
 
     relayListManagerRef.current = null
 
@@ -453,6 +487,57 @@ export function useNostrBT(options = {}) {
     }))
   }, [])
 
+  const mergeBlockedPubkeysFromEvent = useCallback((event) => {
+    if (!event?.pubkey) return
+    const remoteBlocked = parseMuteListPubkeys(event)
+    if (remoteBlocked.length === 0) return
+
+    setBlockedPubkeys(prev => {
+      const next = new Set(prev)
+      for (const pubkey of remoteBlocked) {
+        next.add(pubkey)
+      }
+
+      if (identity?.nostrPubkey) {
+        savePersistedBlockedPubkeys(identity.nostrPubkey, next)
+      }
+
+      return next
+    })
+  }, [identity])
+
+  const refreshBlockedPubkeysFromRelays = useCallback(async (nostrPubkey) => {
+    const transport = managerRef.current?.transport?.nostr
+    if (!transport || !nostrPubkey) return
+
+    const events = await collectEventsWithTimeout(transport, {
+      authors: [nostrPubkey],
+      kinds: [Kinds.MuteList],
+      limit: 10
+    })
+
+    const latest = pickLatestEvent(events)
+    if (latest) {
+      mergeBlockedPubkeysFromEvent(latest)
+    }
+  }, [mergeBlockedPubkeysFromEvent])
+
+  const publishMuteList = useCallback(async (blockedSet) => {
+    const transport = managerRef.current?.transport?.nostr
+    if (!transport || !identity?.nostrPubkey || status !== 'online') {
+      return false
+    }
+
+    try {
+      const muteListEvent = await signEventRef.current(buildMuteListEventTemplate(blockedSet))
+      await transport.publish(muteListEvent)
+      return true
+    } catch (err) {
+      logSwarmEvent(`mute list sync failed: ${err.message}`, 'warning')
+      return false
+    }
+  }, [identity, logSwarmEvent, status])
+
   useEffect(() => {
     if (!identity?.nostrPubkey) return
     savePersistedFollows(identity.nostrPubkey, follows)
@@ -586,8 +671,19 @@ export function useNostrBT(options = {}) {
           logSwarmEvent(`wot refresh failed: ${err.message}`, 'warning')
         })
 
+      const onMuteListEvent = (event) => {
+        if (!isMounted.current) return
+        if (event?.kind !== Kinds.MuteList || event.pubkey !== resolvedNostrPubkey) return
+        mergeBlockedPubkeysFromEvent(event)
+      }
+
       const onEvent = (event) => {
         if (!isMounted.current) return
+
+        if (event?.kind === Kinds.MuteList) {
+          onMuteListEvent(event)
+          return
+        }
 
         if (managerRef.current) {
           Promise.resolve(managerRef.current.handleIncomingEvent(event))
@@ -617,6 +713,11 @@ export function useNostrBT(options = {}) {
         setStatus('online')
         logSwarmEvent('hybrid transport online', 'success')
         subscriptionRef.current = nostr.subscribe({ kinds: [1], limit: 50 }, onEvent)
+        muteListSubscriptionRef.current = nostr.subscribe({ authors: [resolvedNostrPubkey], kinds: [Kinds.MuteList], limit: 1 }, onMuteListEvent)
+
+        refreshBlockedPubkeysFromRelays(resolvedNostrPubkey).catch((err) => {
+          logSwarmEvent(`mute list refresh failed: ${err.message}`, 'warning')
+        })
 
         void (async () => {
           try {
@@ -719,6 +820,8 @@ export function useNostrBT(options = {}) {
     addOrUpdateMessage,
     addSeeding,
     logSwarmEvent,
+    mergeBlockedPubkeysFromEvent,
+    refreshBlockedPubkeysFromRelays,
     refreshDisplayName,
     refreshRelayList,
     resetSessionState,
@@ -1008,6 +1111,7 @@ export function useNostrBT(options = {}) {
   const toggleBlockedPubkey = useCallback((pubkey) => {
     if (!pubkey) return
 
+    let nextSet = null
     setBlockedPubkeys(prev => {
       const next = new Set(prev)
       if (next.has(pubkey)) {
@@ -1019,10 +1123,15 @@ export function useNostrBT(options = {}) {
       if (identity?.nostrPubkey) {
         savePersistedBlockedPubkeys(identity.nostrPubkey, next)
       }
+      nextSet = next
 
       return next
     })
-  }, [identity])
+
+    if (status === 'online' && nextSet) {
+      void publishMuteList(nextSet)
+    }
+  }, [identity, publishMuteList, status])
 
   const reportMessage = useCallback(async (message, reason = 'spam') => {
     if (!managerRef.current || status !== 'online') return false

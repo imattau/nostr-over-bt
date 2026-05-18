@@ -10,11 +10,15 @@ const CSS = `
   .mobile-nav {
     display: none;
     height: 40px;
+    width: 100%;
+    min-width: 0;
     border-top: 1px solid var(--border);
     background: var(--bg2);
+    overflow: hidden;
   }
   .mobile-nav-btn {
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
     border: none;
     background: transparent;
     color: var(--text-dim);
@@ -22,6 +26,9 @@ const CSS = `
     font-size: 12px;
     padding: 0;
     cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .mobile-nav-btn.active {
     color: var(--green);

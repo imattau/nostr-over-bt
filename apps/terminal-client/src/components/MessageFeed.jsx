@@ -40,9 +40,11 @@ const CSS = `
   .msg-author.me { color: var(--purple); }
   .msg-content {
     flex: 1;
+    min-width: 0;
     color: var(--text);
     white-space: pre-wrap;
     word-break: break-word;
+    overflow-wrap: anywhere;
   }
   .thread-shell {
     padding: 4px 0 12px;
@@ -118,6 +120,8 @@ const CSS = `
     text-decoration: underline;
     text-underline-offset: 2px;
     word-break: break-word;
+    overflow-wrap: anywhere;
+    max-width: 100%;
   }
   .msg-link:hover {
     color: var(--yellow);
@@ -152,6 +156,7 @@ const CSS = `
       flex: 1 1 100%;
       min-width: 0;
       width: 100%;
+      overflow-wrap: anywhere;
     }
     .msg-badge {
       order: 4;

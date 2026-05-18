@@ -240,6 +240,8 @@ export default function App() {
     follows,
     seeding,
     publish,
+    resolveNostrReference,
+    addSystemMessage,
     connectWithNsec,
     connectWithExtension,
     logout
@@ -326,6 +328,33 @@ export default function App() {
     if (!message || message.source === 'system') return
     setFocusedMessageId(message.id)
     setReplyTarget(message)
+  }
+
+  const handleResolveNostrLink = async (raw) => {
+    const input = raw?.trim()
+    if (!input) return false
+
+    const normalized = input.toLowerCase().startsWith('nostr:') ? input.slice(6) : input
+    const cachedMatch = messages.find(message => {
+      if (!message?.id || message.source === 'system') return false
+      return normalized.startsWith('note1') || normalized.startsWith('nevent1')
+        ? message.id === normalized
+        : false
+    })
+
+    if (cachedMatch) {
+      handleFocusMessage(cachedMatch)
+      return true
+    }
+
+    const fetched = await resolveNostrReference(normalized)
+    if (fetched) {
+      handleFocusMessage(fetched)
+      return true
+    }
+
+    addSystemMessage(`Could not resolve ${input} from relays.`)
+    return false
   }
 
   const clearFocusedThread = () => {
@@ -430,17 +459,18 @@ export default function App() {
             className="feed-shell"
             style={{ '--composer-height': `${composerHeight}px` }}
           >
-            <MessageFeed
-              messages={messages}
-              activeChannel={activeChannel}
-              follows={follows}
-              blockedPubkeys={blockedPubkeys}
-              selfPubkey={identity?.nostrPubkey}
-              onContextMenu={openPostMenu}
-              focusedMessageId={focusedMessageId}
-              onFocusMessage={handleFocusMessage}
-              onClearFocusedThread={clearFocusedThread}
-            />
+              <MessageFeed
+                messages={messages}
+                activeChannel={activeChannel}
+                follows={follows}
+                blockedPubkeys={blockedPubkeys}
+                selfPubkey={identity?.nostrPubkey}
+                onContextMenu={openPostMenu}
+                focusedMessageId={focusedMessageId}
+                onResolveNostrLink={handleResolveNostrLink}
+                onFocusMessage={handleFocusMessage}
+                onClearFocusedThread={clearFocusedThread}
+              />
             <CommandInput
               onSubmit={publish}
               expanded={composerExpanded}

@@ -15,6 +15,9 @@ const CSS = `
     gap: 0;
     align-items: baseline;
   }
+  .msg-row:nth-of-type(even) {
+    background: rgba(255, 255, 255, 0.015);
+  }
   .msg-row:hover {
     background: var(--bg2);
   }
@@ -87,6 +90,9 @@ const CSS = `
   }
   .thread-node.depth-0 > .msg-row {
     background: rgba(97, 167, 255, 0.06);
+  }
+  .thread-node.depth-0 > .msg-row:nth-of-type(even) {
+    background: rgba(97, 167, 255, 0.08);
   }
   .thread-node.depth-1 {
     margin-left: 18px;
@@ -254,7 +260,7 @@ function normalizeLinkTarget(raw) {
   return `https://njump.me/${raw}`
 }
 
-function renderLinkedContent(content) {
+function renderLinkedContent(content, onOpenNostrLink) {
   if (!content) return ''
 
   const parts = []
@@ -268,15 +274,21 @@ function renderLinkedContent(content) {
     }
 
     const raw = match[0]
+    const isNostrLink = raw.toLowerCase().startsWith('nostr:') || /^(npub|note|nevent|nprofile|naddr)1/.test(raw)
     const href = normalizeLinkTarget(raw)
     parts.push(
       <a
         key={`${match.index}-${raw}`}
         href={href}
         className="msg-link"
-        target="_blank"
-        rel="noreferrer"
-        onClick={(event) => event.stopPropagation()}
+        target={isNostrLink ? undefined : '_blank'}
+        rel={isNostrLink ? undefined : 'noreferrer'}
+        onClick={(event) => {
+          event.stopPropagation()
+          if (!isNostrLink) return
+          event.preventDefault()
+          onOpenNostrLink?.(raw)
+        }}
       >
         {raw}
       </a>
@@ -357,7 +369,7 @@ function flattenThread(nodes) {
   return flat
 }
 
-function MessageRow({ message, onFocusMessage, onContextMenu }) {
+function MessageRow({ message, onResolveNostrLink, onFocusMessage, onContextMenu }) {
   const touchTimerRef = useRef(null)
   const touchStartRef = useRef(null)
   const longPressFiredRef = useRef(false)
@@ -437,7 +449,7 @@ function MessageRow({ message, onFocusMessage, onContextMenu }) {
         &lt;{message.author?.slice(0, 16)}&gt;
       </span>
       <span className={`msg-content ${message.source === 'system' ? 'system' : ''}`}>
-        {renderLinkedContent(message.content)}
+        {renderLinkedContent(message.content, onResolveNostrLink)}
       </span>
       {message.source !== 'system' && (
         <span className={`msg-badge badge-${message.source}`}>
@@ -448,11 +460,12 @@ function MessageRow({ message, onFocusMessage, onContextMenu }) {
   )
 }
 
-function MessageEntry({ message, onFocusMessage, onContextMenu }) {
+function MessageEntry({ message, onResolveNostrLink, onFocusMessage, onContextMenu }) {
   return (
     <div>
       <MessageRow
         message={message}
+        onResolveNostrLink={onResolveNostrLink}
         onFocusMessage={onFocusMessage}
         onContextMenu={onContextMenu}
       />
@@ -481,10 +494,10 @@ function MessageEntry({ message, onFocusMessage, onContextMenu }) {
   )
 }
 
-function ThreadNode({ message, depth, onFocusMessage, onContextMenu }) {
+function ThreadNode({ message, onResolveNostrLink, depth, onFocusMessage, onContextMenu }) {
   return (
     <div className={`thread-node depth-${Math.min(depth, 5)}`}>
-      <MessageEntry message={message} onFocusMessage={onFocusMessage} onContextMenu={onContextMenu} />
+      <MessageEntry message={message} onResolveNostrLink={onResolveNostrLink} onFocusMessage={onFocusMessage} onContextMenu={onContextMenu} />
     </div>
   )
 }
@@ -496,6 +509,7 @@ export default function MessageFeed({
   blockedPubkeys,
   selfPubkey,
   focusedMessageId,
+  onResolveNostrLink,
   onContextMenu,
   onFocusMessage,
   onClearFocusedThread
@@ -552,6 +566,7 @@ export default function MessageFeed({
                 <ThreadNode
                   key={message.id}
                   message={message}
+                  onResolveNostrLink={onResolveNostrLink}
                   depth={depth}
                   onFocusMessage={onFocusMessage}
                   onContextMenu={onContextMenu}
@@ -563,7 +578,7 @@ export default function MessageFeed({
           <div className="empty-feed">No events for this channel.</div>
         ) : (
           filtered.map(message => (
-            <MessageEntry key={message.id} message={message} onFocusMessage={onFocusMessage} onContextMenu={onContextMenu} />
+            <MessageEntry key={message.id} message={message} onResolveNostrLink={onResolveNostrLink} onFocusMessage={onFocusMessage} onContextMenu={onContextMenu} />
           ))
         )}
         <div ref={bottomRef} />

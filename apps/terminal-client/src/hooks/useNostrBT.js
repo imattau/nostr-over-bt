@@ -74,6 +74,77 @@ function collectEventsWithTimeout(transport, filter, timeoutMs = HISTORY_BACKFIL
   })
 }
 
+function collectFirstEventWithTimeout(transport, filter, timeoutMs = HISTORY_BACKFILL_TIMEOUT_MS) {
+  return new Promise(resolve => {
+    let sub
+    const timer = setTimeout(() => {
+      if (sub?.close) sub.close()
+      resolve(null)
+    }, timeoutMs)
+
+    sub = transport.subscribe(filter, (event) => {
+      if (!event?.id) return
+      clearTimeout(timer)
+      if (sub?.close) sub.close()
+      resolve(event)
+    })
+  })
+}
+
+function decodeNostrReference(raw) {
+  if (!raw) return null
+  const normalized = raw.trim().toLowerCase().startsWith('nostr:')
+    ? raw.trim().slice(6)
+    : raw.trim()
+
+  try {
+    return nip19.decode(normalized)
+  } catch {
+    return null
+  }
+}
+
+function getMessageDTag(message) {
+  return message?.tags?.find(tag => tag[0] === 'd')?.[1] || null
+}
+
+function findCachedNostrReferenceMatch(messages, decoded) {
+  if (!decoded?.type || !Array.isArray(messages)) return null
+
+  if (decoded.type === 'note' || decoded.type === 'nevent') {
+    const eventId = typeof decoded.data === 'string' ? decoded.data : decoded.data?.id
+    return eventId ? messages.find(message => message.id === eventId) || null : null
+  }
+
+  if (decoded.type === 'npub' || decoded.type === 'nprofile') {
+    const pubkey = typeof decoded.data === 'string' ? decoded.data : decoded.data?.pubkey
+    if (!pubkey) return null
+
+    const candidates = messages.filter(message => message.pubkey === pubkey && message.source !== 'system')
+    return candidates.length > 0
+      ? candidates.slice().sort((a, b) => b.ts - a.ts)[0]
+      : null
+  }
+
+  if (decoded.type === 'naddr') {
+    const pubkey = decoded.data?.pubkey
+    const kind = decoded.data?.kind
+    const identifier = decoded.data?.identifier
+    if (!pubkey || !Number.isInteger(kind)) return null
+
+    const exact = messages.find(message =>
+      message.pubkey === pubkey &&
+      message.kind === kind &&
+      (identifier ? getMessageDTag(message) === identifier : true)
+    )
+    if (exact) return exact
+
+    return messages.find(message => message.pubkey === pubkey && message.kind === kind) || null
+  }
+
+  return null
+}
+
 function getReplyParentId(event) {
   if (!event?.tags) return null
   const replyTag = event.tags.find(tag => tag[0] === 'e')
@@ -263,6 +334,7 @@ export function useNostrBT() {
         id: event.id,
         author: authorOverride || fallbackAuthor,
         pubkey: event.pubkey,
+        kind: event.kind,
         content: event.content,
         tags: Array.isArray(event.tags) ? event.tags : [],
         replyTo: getReplyParentId(event),
@@ -291,6 +363,59 @@ export function useNostrBT() {
         .slice(-500)
     })
   }, [])
+
+  const resolveNostrReference = useCallback(async (raw) => {
+    const transport = managerRef.current?.transport?.nostr
+    if (!transport) return null
+
+    const decoded = decodeNostrReference(raw)
+    if (!decoded?.type) return null
+
+    const cachedMatch = findCachedNostrReferenceMatch(messages, decoded)
+    if (cachedMatch) {
+      return cachedMatch
+    }
+
+    let event = null
+    if (decoded.type === 'note' || decoded.type === 'nevent') {
+      const eventId = typeof decoded.data === 'string' ? decoded.data : decoded.data?.id
+      if (eventId) {
+        event = await collectFirstEventWithTimeout(transport, { ids: [eventId], limit: 1 })
+      }
+    } else if (decoded.type === 'npub' || decoded.type === 'nprofile') {
+      const pubkey = typeof decoded.data === 'string' ? decoded.data : decoded.data?.pubkey
+      if (pubkey) {
+        event = await collectFirstEventWithTimeout(transport, {
+          authors: [pubkey],
+          kinds: [1],
+          limit: 1
+        })
+      }
+    } else if (decoded.type === 'naddr') {
+      const pubkey = decoded.data?.pubkey
+      const kind = decoded.data?.kind
+      const identifier = decoded.data?.identifier
+      if (pubkey && Number.isInteger(kind)) {
+        const filter = {
+          authors: [pubkey],
+          kinds: [kind],
+          limit: 3
+        }
+
+        if (identifier && kind !== 1) {
+          filter['#d'] = [identifier]
+        }
+
+        event = await collectFirstEventWithTimeout(transport, filter)
+      }
+    }
+
+    if (event) {
+      addOrUpdateMessage(event, 'relay')
+    }
+
+    return event
+  }, [addOrUpdateMessage, messages])
 
   const refreshDisplayName = useCallback((pubkey, profile) => {
     if (!pubkey) return
@@ -907,6 +1032,8 @@ export function useNostrBT() {
     follows,
     seeding,
     publish,
+    resolveNostrReference,
+    addSystemMessage,
     connectWithNsec,
     connectWithExtension,
     logout

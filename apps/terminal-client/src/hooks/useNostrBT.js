@@ -290,6 +290,7 @@ export function useNostrBT(options = {}) {
   const subscriptionRef = useRef(null)
   const muteListSubscriptionRef = useRef(null)
   const intervalRef = useRef(null)
+  const identityRef = useRef(null)
   const signEventRef = useRef(async () => {
     throw new Error('Not authenticated')
   })
@@ -498,13 +499,13 @@ export function useNostrBT(options = {}) {
         next.add(pubkey)
       }
 
-      if (identity?.nostrPubkey) {
-        savePersistedBlockedPubkeys(identity.nostrPubkey, next)
+      if (identityRef.current?.nostrPubkey) {
+        savePersistedBlockedPubkeys(identityRef.current.nostrPubkey, next)
       }
 
       return next
     })
-  }, [identity])
+  }, [])
 
   const refreshBlockedPubkeysFromRelays = useCallback(async (nostrPubkey) => {
     const transport = managerRef.current?.transport?.nostr
@@ -524,7 +525,7 @@ export function useNostrBT(options = {}) {
 
   const publishMuteList = useCallback(async (blockedSet) => {
     const transport = managerRef.current?.transport?.nostr
-    if (!transport || !identity?.nostrPubkey || status !== 'online') {
+    if (!transport || !identityRef.current?.nostrPubkey || status !== 'online') {
       return false
     }
 
@@ -536,7 +537,11 @@ export function useNostrBT(options = {}) {
       logSwarmEvent(`mute list sync failed: ${err.message}`, 'warning')
       return false
     }
-  }, [identity, logSwarmEvent, status])
+  }, [logSwarmEvent, status])
+
+  useEffect(() => {
+    identityRef.current = identity || null
+  }, [identity])
 
   useEffect(() => {
     if (!identity?.nostrPubkey) return
@@ -555,7 +560,7 @@ export function useNostrBT(options = {}) {
   }) => {
     if (!isMounted.current) return
 
-    const switchingFromExistingSession = Boolean(identity)
+    const switchingFromExistingSession = Boolean(identityRef.current)
     teardownSession()
     setAuthError('')
     setStatus('initializing')
@@ -1120,8 +1125,8 @@ export function useNostrBT(options = {}) {
         next.add(pubkey)
       }
 
-      if (identity?.nostrPubkey) {
-        savePersistedBlockedPubkeys(identity.nostrPubkey, next)
+      if (identityRef.current?.nostrPubkey) {
+        savePersistedBlockedPubkeys(identityRef.current.nostrPubkey, next)
       }
       nextSet = next
 
@@ -1131,7 +1136,7 @@ export function useNostrBT(options = {}) {
     if (status === 'online' && nextSet) {
       void publishMuteList(nextSet)
     }
-  }, [identity, publishMuteList, status])
+  }, [publishMuteList, status])
 
   const reportMessage = useCallback(async (message, reason = 'spam') => {
     if (!managerRef.current || status !== 'online') return false

@@ -129,6 +129,23 @@ sanitize_domain() {
   printf '%s' "$input"
 }
 
+escape_ere() {
+  printf '%s' "$1" | sed 's/[.[\*^$()+?{}|\\/]/\\&/g'
+}
+
+build_caddy_site_patterns() {
+  local domain="$1"
+  local escaped_domain
+  escaped_domain="$(escape_ere "$domain")"
+  printf '%s\n' "$escaped_domain"
+
+  local suffix="$domain"
+  while [[ "$suffix" == *.* ]]; do
+    suffix="${suffix#*.}"
+    printf '%s\n' "\\*\\.$(escape_ere "$suffix")"
+  done
+}
+
 detect_proxies() {
   local options=()
 
@@ -349,6 +366,74 @@ find_caddy_dropin_dir() {
   return 1
 }
 
+find_caddy_config_files() {
+  local files=()
+  local candidate
+
+  for candidate in /etc/caddy/Caddyfile /etc/caddy/caddyfile; do
+    [[ -f "$candidate" ]] && files+=("$candidate")
+  done
+
+  for candidate in /etc/caddy/conf.d /etc/caddy/sites.d /etc/caddy/Caddyfile.d /etc/caddy.d; do
+    if [[ -d "$candidate" ]]; then
+      while IFS= read -r -d '' file; do
+        files+=("$file")
+      done < <(find "$candidate" -maxdepth 1 -type f \( -name '*.caddy' -o -name 'Caddyfile' -o -name '*.conf' \) -print0 2>/dev/null)
+    fi
+  done
+
+  printf '%s\n' "${files[@]}"
+}
+
+scan_caddy_file_for_domain() {
+  local file="$1"
+  local patterns="$2"
+  local sanitized
+
+  sanitized="$(
+    awk '
+      /# BEGIN nostr-over-bt-terminal/ {skip=1; next}
+      /# END nostr-over-bt-terminal/ {skip=0; next}
+      skip != 1 { print }
+    ' "$file"
+  )"
+
+  while IFS= read -r pattern; do
+    [[ -n "$pattern" ]] || continue
+    if printf '%s\n' "$sanitized" | grep -Eq "^[[:space:]]*(${pattern})[[:space:]]*\\{"; then
+      return 0
+    fi
+  done <<< "$patterns"
+
+  return 1
+}
+
+check_caddy_domain_conflicts() {
+  local domain="$1"
+  local ignore_file="${2:-}"
+  local patterns
+  patterns="$(build_caddy_site_patterns "$domain")"
+  local matches=()
+  local file
+
+  while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    if [[ -n "$ignore_file" && "$file" == "$ignore_file" ]]; then
+      continue
+    fi
+    if scan_caddy_file_for_domain "$file" "$patterns"; then
+      matches+=("$file")
+    fi
+  done < <(find_caddy_config_files)
+
+  if [[ ${#matches[@]} -gt 0 ]]; then
+    printf '%s\n' "${matches[@]}"
+    return 0
+  fi
+
+  return 1
+}
+
 write_caddy_inline_config() {
   local caddyfile="$1"
   local tmp_file
@@ -422,7 +507,8 @@ write_caddy_dropin_config() {
   remove_managed_caddy_blocks "$caddyfile"
   ensure_caddy_dropin_import "$caddyfile" "$dropin_dir/*.caddy"
 
-  cat > "$dropin_dir/$SITE_NAME.caddy" <<EOF
+  local dropin_file="$dropin_dir/$SITE_NAME.caddy"
+  cat > "$dropin_file" <<EOF
 $DOMAIN {
     root * $WWW_DIR
     encode zstd gzip
@@ -431,7 +517,17 @@ $DOMAIN {
 }
 EOF
 
-  echo "$caddyfile"
+  echo "$dropin_file"
+}
+
+get_caddy_target_file() {
+  local dropin_dir=""
+  if dropin_dir="$(find_caddy_dropin_dir)"; then
+    printf '%s/%s.caddy\n' "$dropin_dir" "$SITE_NAME"
+    return 0
+  fi
+
+  find_caddyfile
 }
 
 write_caddy_config() {
@@ -453,10 +549,19 @@ validate_and_reload() {
   local service_name="$1"
   case "$service_name" in
     caddy)
-      local caddyfile
-      caddyfile="$(write_caddy_config)"
-      log "Validating Caddy configuration at $caddyfile"
-      caddy validate --config "$caddyfile" --adapter caddyfile
+      local target_file conflicts
+      target_file="$(get_caddy_target_file)"
+      if conflicts="$(check_caddy_domain_conflicts "$DOMAIN" "$target_file")"; then
+        warn "Detected multiple Caddy site definitions for $DOMAIN:"
+        while IFS= read -r conflict; do
+          [[ -n "$conflict" ]] || continue
+          warn "  - $conflict"
+        done <<< "$conflicts"
+        die "Refusing to apply config because the domain is already defined more than once."
+      fi
+      target_file="$(write_caddy_config)"
+      log "Validating Caddy configuration at $target_file"
+      caddy validate --config "$target_file" --adapter caddyfile
       systemctl reload caddy 2>/dev/null || systemctl restart caddy
       ;;
     nginx)

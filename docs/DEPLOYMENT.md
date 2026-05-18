@@ -38,6 +38,7 @@ Notes:
 - `~` and relative install/web-root paths are expanded before use.
 - Caddy uses the first supported drop-in directory it finds, such as `/etc/caddy/conf.d`, `/etc/caddy/sites.d`, `/etc/caddy/Caddyfile.d`, or `/etc/caddy.d`, and adds an import line to the main Caddyfile if needed.
 - If no Caddy drop-in directory exists, the script writes the site block directly into the main Caddyfile.
+- The Caddy preflight checks exact hosts and wildcard overlaps, so subdomains like `app.example.com` are rejected if `*.example.com` is already defined.
 - Nginx and Apache get static SPA site configs that fall back to `index.html`.
 - If you want to re-run the prompts, pass `--reconfigure`:
 

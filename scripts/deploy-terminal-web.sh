@@ -376,6 +376,20 @@ EOF
   echo "$caddyfile"
 }
 
+remove_managed_caddy_blocks() {
+  local caddyfile="$1"
+  local tmp_file
+  tmp_file="$(mktemp)"
+
+  awk '
+    /# BEGIN nostr-over-bt-terminal/ {skip=1; next}
+    /# END nostr-over-bt-terminal/ {skip=0; next}
+    skip != 1 { print }
+  ' "$caddyfile" > "$tmp_file"
+
+  mv "$tmp_file" "$caddyfile"
+}
+
 ensure_caddy_dropin_import() {
   local caddyfile="$1"
   local dropin_glob="$2"
@@ -405,6 +419,7 @@ write_caddy_dropin_config() {
   caddyfile="$(find_caddyfile)" || die "Could not locate a Caddyfile under /etc/caddy."
 
   install -d -m 0755 "$dropin_dir"
+  remove_managed_caddy_blocks "$caddyfile"
   ensure_caddy_dropin_import "$caddyfile" "$dropin_dir/*.caddy"
 
   cat > "$dropin_dir/$SITE_NAME.caddy" <<EOF
@@ -430,6 +445,7 @@ write_caddy_config() {
   local caddyfile
   caddyfile="$(find_caddyfile)" || die "Could not locate a Caddyfile under /etc/caddy."
   log "Using inline Caddyfile: $caddyfile"
+  remove_managed_caddy_blocks "$caddyfile"
   write_caddy_inline_config "$caddyfile"
 }
 

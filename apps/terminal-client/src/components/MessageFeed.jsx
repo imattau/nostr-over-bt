@@ -3,17 +3,22 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 const CSS = `
   .feed {
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 8px 0;
     background: var(--bg);
     font-size: 12px;
     line-height: 1.6;
     height: 100%;
+    min-width: 0;
   }
   .msg-row {
     display: flex;
+    width: 100%;
+    min-width: 0;
     padding: 1px 12px;
     gap: 0;
     align-items: baseline;
+    border-top: 1px solid rgba(255, 255, 255, 0.035);
   }
   .msg-row:nth-of-type(even) {
     background: rgba(255, 255, 255, 0.015);
@@ -29,6 +34,7 @@ const CSS = `
   .msg-author {
     min-width: 116px;
     flex-shrink: 0;
+    max-width: 116px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -92,6 +98,7 @@ const CSS = `
   }
   .thread-node.depth-0 > .msg-row {
     background: rgba(97, 167, 255, 0.06);
+    border-top-color: rgba(97, 167, 255, 0.16);
   }
   .thread-node.depth-0 > .msg-row:nth-of-type(even) {
     background: rgba(97, 167, 255, 0.08);
@@ -140,6 +147,7 @@ const CSS = `
       align-items: flex-start;
       gap: 2px 8px;
       padding: 4px 12px;
+      border-top-color: rgba(255, 255, 255, 0.045);
     }
     .msg-time {
       min-width: 0;
@@ -147,9 +155,9 @@ const CSS = `
     }
     .msg-author {
       min-width: 0;
+      max-width: 100%;
       order: 3;
       white-space: nowrap;
-      max-width: 100%;
     }
     .msg-content {
       order: 1;
@@ -157,6 +165,7 @@ const CSS = `
       min-width: 0;
       width: 100%;
       overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .msg-badge {
       order: 4;
@@ -166,6 +175,10 @@ const CSS = `
     .msg-files,
     .msg-relays {
       padding-left: 12px;
+      max-width: 100%;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
   }
   .badge-relay {
@@ -187,6 +200,7 @@ const CSS = `
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
   }
   .msg-files {
     padding: 0 12px 2px 170px;
@@ -195,6 +209,7 @@ const CSS = `
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+    min-width: 0;
   }
   .msg-relays {
     padding: 0 12px 2px 170px;
@@ -203,6 +218,7 @@ const CSS = `
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
   }
   .msg-file {
     border: 1px solid var(--border);

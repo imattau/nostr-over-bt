@@ -11,6 +11,7 @@ import {
 } from 'nostr-over-bt'
 import { finalizeEvent, getPublicKey, generateSecretKey } from 'nostr-tools/pure'
 import * as nip19 from 'nostr-tools/nip19'
+import { bytesToHex } from 'nostr-tools/utils'
 
 const AUTH_MODE_KEY = 'terminal_auth_mode'
 const NOSTR_SECRET_KEY = 'terminal_nostr_nsec'
@@ -90,7 +91,10 @@ function decodeSecretInput(value) {
   if (input.startsWith('nsec1')) {
     try {
       const decoded = nip19.decode(input)
-      return typeof decoded.data === 'string' ? decoded.data : null
+      if (decoded.type !== 'nsec') return null
+      if (typeof decoded.data === 'string') return decoded.data
+      if (decoded.data instanceof Uint8Array) return bytesToHex(decoded.data)
+      return null
     } catch {
       return null
     }

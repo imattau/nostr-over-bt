@@ -124,6 +124,38 @@ const CSS = `
     margin-left: 8px;
     align-self: center;
   }
+  @media (max-width: 599px) {
+    .msg-row {
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 2px 8px;
+      padding: 4px 12px;
+    }
+    .msg-time {
+      min-width: 0;
+      order: 2;
+    }
+    .msg-author {
+      min-width: 0;
+      order: 3;
+      white-space: nowrap;
+      max-width: 100%;
+    }
+    .msg-content {
+      order: 1;
+      flex: 1 1 100%;
+      min-width: 0;
+      width: 100%;
+    }
+    .msg-badge {
+      order: 4;
+      margin-left: auto;
+    }
+    .msg-magnet,
+    .msg-files {
+      padding-left: 12px;
+    }
+  }
   .badge-relay {
     color: var(--blue);
     border: 1px solid var(--blue);
@@ -161,6 +193,42 @@ const CSS = `
     color: var(--text-dim);
     font-style: italic;
     padding: 16px 12px;
+  }
+  @media (max-width: 599px) {
+    .thread-shell {
+      padding: 2px 0 8px;
+    }
+    .thread-banner {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+      padding: 4px 12px 8px;
+      margin-bottom: 6px;
+      line-height: 1.25;
+    }
+    .thread-banner strong {
+      margin-left: 6px;
+    }
+    .thread-banner button {
+      align-self: flex-end;
+      font-size: 10px;
+      padding: 1px 6px;
+    }
+    .thread-node.depth-1 {
+      margin-left: 12px;
+    }
+    .thread-node.depth-2 {
+      margin-left: 20px;
+    }
+    .thread-node.depth-3 {
+      margin-left: 28px;
+    }
+    .thread-node.depth-4 {
+      margin-left: 36px;
+    }
+    .thread-node.depth-5 {
+      margin-left: 44px;
+    }
   }
 `
 

@@ -209,6 +209,48 @@ const CSS = `
   .cmd-input::placeholder {
     color: var(--text-dim);
   }
+  @media (max-width: 599px) {
+    .cmd-input-wrap {
+      min-height: 32px;
+      padding: 0 10px;
+      gap: 6px;
+    }
+    .cmd-input-stack {
+      gap: 4px;
+      padding: 4px 0;
+    }
+    .cmd-reply {
+      padding: 1px 6px;
+      font-size: 10px;
+      line-height: 1.25;
+    }
+    .cmd-reply strong {
+      margin-right: 4px;
+    }
+    .cmd-reply button {
+      font-size: 10px;
+    }
+    .cmd-warnings {
+      gap: 2px;
+      padding: 4px 6px;
+      font-size: 10px;
+    }
+    .cmd-previews {
+      min-height: 48px;
+    }
+    .cmd-preview {
+      flex-basis: 160px;
+      height: 48px;
+    }
+    .cmd-preview img,
+    .cmd-preview-video {
+      width: 40px;
+      height: 40px;
+    }
+    .cmd-preview-meta strong {
+      max-width: 140px;
+    }
+  }
 `
 
 function dedupeFiles(files) {

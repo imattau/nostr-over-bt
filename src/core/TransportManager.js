@@ -234,24 +234,47 @@ export class TransportManager {
             throw new TransportError(`Relay publish failed: ${error.message}. Seeding aborted.`, "nostr");
         }
 
-        const eventBuffer = this.packager.package(signedEvent);
-        const eventFilename = this.packager.getFilename(signedEvent);
-
-        const seedPromises = [
-            this.transport.bt.publish({ buffer: eventBuffer, filename: eventFilename })
-        ];
+        const seeds = [{
+            kind: 'event',
+            filename: this.packager.getFilename(signedEvent),
+            publish: () => this.transport.bt.publish({
+                buffer: this.packager.package(signedEvent),
+                filename: this.packager.getFilename(signedEvent)
+            })
+        }];
 
         for (const file of mediaFiles) {
             if (file.buffer && file.filename) {
-                seedPromises.push(this.transport.bt.publish(file));
+                seeds.push({
+                    kind: 'media',
+                    filename: file.filename,
+                    publish: () => this.transport.bt.publish(file)
+                });
             }
         }
 
-        const magnetUris = await Promise.all(seedPromises);
+        const settled = await Promise.allSettled(seeds.map(seed => seed.publish()));
+        const fulfilled = settled
+            .map((result, index) => ({ result, seed: seeds[index] }))
+            .filter(({ result }) => result.status === 'fulfilled')
+            .map(({ result }) => result.value);
+        const eventSeedError = settled[0]?.status === 'rejected'
+            ? (settled[0].reason?.message || String(settled[0].reason))
+            : null;
+        const mediaErrors = settled
+            .slice(1)
+            .map((result, index) => ({ result, seed: seeds[index + 1] }))
+            .filter(({ result }) => result.status === 'rejected')
+            .map(({ seed, result }) => ({
+                filename: seed.filename,
+                error: result.reason?.message || String(result.reason)
+            }));
 
         return {
-            magnetUri: magnetUris[0],
-            mediaMagnets: magnetUris.slice(1),
+            magnetUri: fulfilled[0] || null,
+            mediaMagnets: fulfilled.slice(1),
+            eventSeedError,
+            mediaErrors,
             relayStatus
         };
     }

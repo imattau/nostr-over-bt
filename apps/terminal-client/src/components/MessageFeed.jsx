@@ -224,7 +224,7 @@ function renderLinkedContent(content) {
   return parts.length > 0 ? parts : content
 }
 
-function filterMessages(messages, activeChannel, follows, blockedPubkeys) {
+function filterMessages(messages, activeChannel, follows, blockedPubkeys, selfPubkey) {
   const isBlocked = (message) => Boolean(message.pubkey && blockedPubkeys.has(message.pubkey))
 
   if (activeChannel === 'nostr-bt') {
@@ -232,7 +232,18 @@ function filterMessages(messages, activeChannel, follows, blockedPubkeys) {
   }
 
   if (activeChannel === 'follows') {
-    return messages.filter(message => message.source === 'system' || ((message.pubkey && follows.has(message.pubkey)) && !isBlocked(message)))
+    return messages.filter(message => {
+      if (message.source === 'system') return true
+      const isSelf = selfPubkey && message.pubkey === selfPubkey
+      return (isSelf || (message.pubkey && follows.has(message.pubkey))) && !isBlocked(message)
+    })
+  }
+
+  if (activeChannel === 'myposts') {
+    return messages.filter(message => {
+      if (message.source === 'system') return false
+      return Boolean(selfPubkey && message.pubkey === selfPubkey)
+    })
   }
 
   return messages.filter(message => message.source === 'system' || !isBlocked(message))
@@ -278,27 +289,105 @@ function flattenThread(nodes) {
   return flat
 }
 
-function ThreadNode({ message, depth, onFocusMessage, onContextMenu }) {
+function MessageRow({ message, onFocusMessage, onContextMenu }) {
+  const touchTimerRef = useRef(null)
+  const touchStartRef = useRef(null)
+  const longPressFiredRef = useRef(false)
+
+  useEffect(() => () => {
+    if (touchTimerRef.current) {
+      clearTimeout(touchTimerRef.current)
+    }
+  }, [])
+
+  const clearTouchTimer = () => {
+    if (touchTimerRef.current) {
+      clearTimeout(touchTimerRef.current)
+      touchTimerRef.current = null
+    }
+  }
+
+  const handleTouchStart = (event) => {
+    const touch = event.touches?.[0]
+    if (!touch) return
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY }
+    longPressFiredRef.current = false
+    clearTouchTimer()
+    touchTimerRef.current = setTimeout(() => {
+      longPressFiredRef.current = true
+      navigator.vibrate?.(10)
+      onContextMenu?.(message, {
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+        preventDefault: () => {}
+      })
+    }, 500)
+  }
+
+  const handleTouchMove = (event) => {
+    const start = touchStartRef.current
+    const touch = event.touches?.[0]
+    if (!start || !touch) return
+
+    if (Math.abs(touch.clientX - start.x) > 10 || Math.abs(touch.clientY - start.y) > 10) {
+      clearTouchTimer()
+    }
+  }
+
+  const handleTouchEnd = () => {
+    clearTouchTimer()
+    touchStartRef.current = null
+  }
+
+  const handleTouchCancel = () => {
+    clearTouchTimer()
+    touchStartRef.current = null
+  }
+
+  const handleClick = (event) => {
+    if (longPressFiredRef.current) {
+      event.preventDefault()
+      event.stopPropagation()
+      longPressFiredRef.current = false
+      return
+    }
+    onFocusMessage?.(message)
+  }
+
   return (
-    <div className={`thread-node depth-${Math.min(depth, 5)}`}>
-      <div
-        className="msg-row"
-        onClick={() => onFocusMessage?.(message)}
-        onContextMenu={(event) => onContextMenu?.(message, event)}
-      >
-        <span className="msg-time">{formatTime(message.ts)}</span>
-        <span className={`msg-author ${message.source}`}>
-          &lt;{message.author?.slice(0, 16)}&gt;
+    <div
+      className="msg-row"
+      onClick={handleClick}
+      onContextMenu={(event) => onContextMenu?.(message, event)}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchCancel}
+    >
+      <span className="msg-time">{formatTime(message.ts)}</span>
+      <span className={`msg-author ${message.source}`}>
+        &lt;{message.author?.slice(0, 16)}&gt;
+      </span>
+      <span className={`msg-content ${message.source === 'system' ? 'system' : ''}`}>
+        {renderLinkedContent(message.content)}
+      </span>
+      {message.source !== 'system' && (
+        <span className={`msg-badge badge-${message.source}`}>
+          [{message.source}]
         </span>
-        <span className={`msg-content ${message.source === 'system' ? 'system' : ''}`}>
-          {renderLinkedContent(message.content)}
-        </span>
-        {message.source !== 'system' && (
-          <span className={`msg-badge badge-${message.source}`}>
-            [{message.source}]
-          </span>
-        )}
-      </div>
+      )}
+    </div>
+  )
+}
+
+function MessageEntry({ message, onFocusMessage, onContextMenu }) {
+  return (
+    <div>
+      <MessageRow
+        message={message}
+        onFocusMessage={onFocusMessage}
+        onContextMenu={onContextMenu}
+      />
       {message.magnetUri && (
         <div className="msg-magnet">
           └─ 📦{' '}
@@ -324,11 +413,20 @@ function ThreadNode({ message, depth, onFocusMessage, onContextMenu }) {
   )
 }
 
+function ThreadNode({ message, depth, onFocusMessage, onContextMenu }) {
+  return (
+    <div className={`thread-node depth-${Math.min(depth, 5)}`}>
+      <MessageEntry message={message} onFocusMessage={onFocusMessage} onContextMenu={onContextMenu} />
+    </div>
+  )
+}
+
 export default function MessageFeed({
   messages,
   activeChannel,
   follows,
   blockedPubkeys,
+  selfPubkey,
   focusedMessageId,
   onContextMenu,
   onFocusMessage,
@@ -339,8 +437,8 @@ export default function MessageFeed({
   const [autoScroll, setAutoScroll] = useState(true)
 
   const filtered = useMemo(
-    () => filterMessages(messages, activeChannel, follows, blockedPubkeys),
-    [messages, activeChannel, follows, blockedPubkeys]
+    () => filterMessages(messages, activeChannel, follows, blockedPubkeys, selfPubkey),
+    [messages, activeChannel, follows, blockedPubkeys, selfPubkey]
   )
 
   const threadMessages = useMemo(
@@ -397,47 +495,7 @@ export default function MessageFeed({
           <div className="empty-feed">No events for this channel.</div>
         ) : (
           filtered.map(message => (
-            <div
-              key={message.id}
-              onClick={() => onFocusMessage?.(message)}
-              onContextMenu={(event) => onContextMenu?.(message, event)}
-            >
-              <div className="msg-row">
-                <span className="msg-time">{formatTime(message.ts)}</span>
-                <span className={`msg-author ${message.source}`}>
-                  &lt;{message.author?.slice(0, 16)}&gt;
-                </span>
-                <span className={`msg-content ${message.source === 'system' ? 'system' : ''}`}>
-                  {renderLinkedContent(message.content)}
-                </span>
-                {message.source !== 'system' && (
-                  <span className={`msg-badge badge-${message.source}`}>
-                    [{message.source}]
-                  </span>
-                )}
-              </div>
-              {message.magnetUri && (
-                <div className="msg-magnet">
-                  └─ 📦{' '}
-                  <a
-                    href={message.magnetUri}
-                    className="msg-link"
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    {message.magnetUri}
-                  </a>
-                </div>
-              )}
-              {message.files && message.files.length > 0 ? (
-                <div className="msg-files">
-                  {message.files.map(file => (
-                    <span key={file} className="msg-file">└─ {file}</span>
-                  ))}
-                </div>
-              ) : null}
-            </div>
+            <MessageEntry key={message.id} message={message} onFocusMessage={onFocusMessage} onContextMenu={onContextMenu} />
           ))
         )}
         <div ref={bottomRef} />

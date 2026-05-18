@@ -8,6 +8,8 @@ import SwarmPanel from './components/SwarmPanel.jsx'
 import LoginScreen from './components/LoginScreen.jsx'
 import AccountMenu from './components/AccountMenu.jsx'
 import PostContextMenu from './components/PostContextMenu.jsx'
+import MobileNav from './components/MobileNav.jsx'
+import { useSwipe } from './hooks/useSwipe.js'
 
 const CSS = `
   :root {
@@ -64,16 +66,25 @@ const CSS = `
   .app {
     display: grid;
     grid-template-rows: 28px minmax(0, 1fr);
-    grid-template-columns: 150px minmax(0, 1fr) 280px;
+    grid-template-columns: 1fr;
     grid-template-areas:
-      'status status status'
-      'channels feed swarm';
+      'status'
+      'main';
     height: 100vh;
     overflow: hidden;
   }
 
   .status-bar {
     grid-area: status;
+  }
+
+  .main-stage {
+    grid-area: main;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr) 280px;
+    grid-template-areas: 'channels feed swarm';
+    overflow: hidden;
   }
 
   .channel-list {
@@ -98,6 +109,92 @@ const CSS = `
     overflow: hidden;
   }
 
+  .mobile-nav-bar {
+    grid-area: mobile-nav;
+    display: none;
+  }
+
+  @media (min-width: 768px) and (max-width: 1023px) {
+    .main-stage {
+      grid-template-columns: 120px minmax(0, 1fr) 220px;
+    }
+  }
+
+  @media (min-width: 600px) and (max-width: 767px) {
+    .app {
+      grid-template-columns: 1fr;
+      grid-template-areas:
+        'status'
+        'main';
+    }
+
+    .main-stage {
+      grid-template-columns: 120px minmax(0, 1fr);
+      grid-template-areas: 'channels feed';
+    }
+
+    .swarm-panel {
+      display: none;
+    }
+
+    .swarm-panel.overlay.visible {
+      display: flex;
+      position: fixed;
+      top: 28px;
+      right: 0;
+      width: 280px;
+      height: calc(100vh - 28px);
+      z-index: 20;
+      background: var(--bg);
+    }
+
+    .mobile-nav-bar {
+      display: none;
+    }
+  }
+
+  @media (max-width: 599px) {
+    .app {
+      grid-template-rows: 28px minmax(0, 1fr) 40px;
+      grid-template-areas:
+        'status'
+        'main'
+        'mobile-nav';
+    }
+
+    .main-stage {
+      display: flex;
+      width: 300%;
+      transform: translateX(calc(var(--pane-index, 0) * -33.333333%));
+      transition: transform 180ms ease;
+    }
+
+    .channel-list,
+    .feed-shell,
+    .swarm-panel {
+      flex: 0 0 33.333333%;
+      width: 33.333333%;
+      min-width: 0;
+      border: none;
+    }
+
+    .channel-list {
+      border-right: 1px solid var(--border);
+    }
+
+    .feed-shell {
+      grid-template-rows: minmax(0, 1fr) var(--composer-height, 36px);
+    }
+
+    .feed {
+      padding-bottom: 40px;
+    }
+
+    .mobile-nav-bar {
+      display: block;
+    }
+  }
+
   ::-webkit-scrollbar {
     width: 4px;
     height: 4px;
@@ -118,6 +215,8 @@ export default function App() {
   const [postMenu, setPostMenu] = useState(null)
   const [focusedMessageId, setFocusedMessageId] = useState(null)
   const [composerHeight, setComposerHeight] = useState(36)
+  const [activePane, setActivePane] = useState('feed')
+  const [showSwarm, setShowSwarm] = useState(false)
   const {
     status,
     authMode,
@@ -137,6 +236,7 @@ export default function App() {
     blockedPubkeys,
     toggleBlockedPubkey,
     reportMessage,
+    publishWarnings,
     follows,
     seeding,
     publish,
@@ -144,6 +244,21 @@ export default function App() {
     connectWithExtension,
     logout
   } = useNostrBT()
+
+  const { onTouchStart, onTouchEnd } = useSwipe({
+    onSwipeLeft: () => {
+      const panes = ['feed', 'swarm', 'channels']
+      const index = panes.indexOf(activePane)
+      setActivePane(panes[(index + 1) % panes.length])
+    },
+    onSwipeRight: () => {
+      const panes = ['feed', 'swarm', 'channels']
+      const index = panes.indexOf(activePane)
+      setActivePane(panes[(index + panes.length - 1) % panes.length])
+    }
+  })
+
+  const paneIndex = { feed: 0, swarm: 1, channels: 2 }[activePane] ?? 0
 
   useEffect(() => {
     if (status === 'online' && identity) {
@@ -159,6 +274,11 @@ export default function App() {
     setFocusedMessageId(null)
     setReplyTarget(null)
   }, [activeChannel, identity, setReplyTarget])
+
+  useEffect(() => {
+    setActivePane('feed')
+    setShowSwarm(false)
+  }, [identity])
 
   const closePostMenu = () => setPostMenu(null)
 
@@ -289,39 +409,53 @@ export default function App() {
             activeChannel={activeChannel}
             onLogout={logout}
             onAccountSwitch={() => setShowAccountMenu(true)}
-          />
-        </div>
-        <div className="channel-list">
-          <ChannelList
-            activeChannel={activeChannel}
-            setActiveChannel={setActiveChannel}
-            peers={peers}
+            showSwarmToggle={showSwarm}
+            onToggleSwarm={() => setShowSwarm(value => !value)}
           />
         </div>
         <div
-          className="feed-shell"
-          style={{ '--composer-height': `${composerHeight}px` }}
+          className="main-stage"
+          onTouchStart={onTouchStart}
+          onTouchEnd={onTouchEnd}
+          style={{ '--pane-index': paneIndex }}
         >
-          <MessageFeed
-            messages={messages}
-            activeChannel={activeChannel}
-            follows={follows}
-            blockedPubkeys={blockedPubkeys}
-            onContextMenu={openPostMenu}
-            focusedMessageId={focusedMessageId}
-            onFocusMessage={handleFocusMessage}
-            onClearFocusedThread={clearFocusedThread}
-          />
-          <CommandInput
-            onSubmit={publish}
-            expanded={composerExpanded}
-            replyTarget={replyTarget}
-            onClearReplyTarget={() => setReplyTarget(null)}
-            onHeightChange={setComposerHeight}
-          />
+          <div className="channel-list">
+            <ChannelList
+              activeChannel={activeChannel}
+              setActiveChannel={setActiveChannel}
+              peers={peers}
+            />
+          </div>
+          <div
+            className="feed-shell"
+            style={{ '--composer-height': `${composerHeight}px` }}
+          >
+            <MessageFeed
+              messages={messages}
+              activeChannel={activeChannel}
+              follows={follows}
+              blockedPubkeys={blockedPubkeys}
+              selfPubkey={identity?.nostrPubkey}
+              onContextMenu={openPostMenu}
+              focusedMessageId={focusedMessageId}
+              onFocusMessage={handleFocusMessage}
+              onClearFocusedThread={clearFocusedThread}
+            />
+            <CommandInput
+              onSubmit={publish}
+              expanded={composerExpanded}
+              replyTarget={replyTarget}
+              onClearReplyTarget={() => setReplyTarget(null)}
+              onHeightChange={setComposerHeight}
+              publishWarnings={publishWarnings}
+            />
+          </div>
+          <div className={`swarm-panel overlay ${showSwarm ? 'visible' : ''}`}>
+            <SwarmPanel swarmEvents={swarmEvents} stats={stats} seeding={seeding} />
+          </div>
         </div>
-        <div className="swarm-panel">
-          <SwarmPanel swarmEvents={swarmEvents} stats={stats} seeding={seeding} />
+        <div className="mobile-nav-bar">
+          <MobileNav activePane={activePane} onSelect={setActivePane} />
         </div>
       </div>
       {showAccountMenu ? (

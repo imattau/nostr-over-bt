@@ -1,4 +1,4 @@
-const CHANNELS = ['global', 'nostr-bt', 'follows']
+const CHANNELS = ['global', 'nostr-bt', 'follows', 'myposts']
 
 const CSS = `
   .chanlist {

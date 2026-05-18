@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 const CSS = `
   .cmd-input-wrap {
@@ -12,6 +12,25 @@ const CSS = `
     flex-shrink: 0;
     position: relative;
     cursor: text;
+  }
+  .cmd-media-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cmd-media-btn {
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-dim);
+    font: inherit;
+    font-size: 12px;
+    padding: 2px 8px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .cmd-media-btn:hover {
+    color: var(--text);
+    border-color: var(--blue);
   }
   .cmd-input-wrap.dragging {
     border-top-color: var(--blue);
@@ -32,6 +51,7 @@ const CSS = `
   .cmd-input-stack {
     flex: 1;
     min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -67,29 +87,84 @@ const CSS = `
   .cmd-reply button:hover {
     color: var(--yellow);
   }
-  .cmd-attachments {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
+  .cmd-warnings {
+    display: grid;
+    gap: 4px;
+    border: 1px solid rgba(255, 107, 107, 0.28);
+    background: rgba(255, 107, 107, 0.08);
+    color: var(--red);
+    font-size: 11px;
+    padding: 6px 8px;
   }
-  .cmd-chip {
-    display: inline-flex;
-    align-items: center;
+  .cmd-warning {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cmd-previews {
+    display: flex;
+    flex-wrap: nowrap;
     gap: 6px;
+    min-height: 56px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .cmd-preview {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 56px;
     max-width: 100%;
     border: 1px solid var(--border);
     background: var(--bg);
     color: var(--text-dim);
     font-size: 11px;
-    padding: 2px 8px;
+    padding: 4px 8px 4px 4px;
+    overflow: hidden;
+    flex: 0 0 180px;
   }
-  .cmd-chip span {
+  .cmd-preview img {
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: var(--bg3);
+  }
+  .cmd-preview-video {
+    width: 48px;
+    height: 48px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+    color: var(--green);
+    font-size: 18px;
+  }
+  .cmd-preview-meta {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+  .cmd-preview-meta strong {
+    color: var(--text);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     max-width: 180px;
+  }
+  .cmd-preview-meta span {
+    overflow: hidden;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .cmd-chip button {
+  .cmd-preview button {
+    position: absolute;
+    top: 2px;
+    right: 4px;
     border: none;
     background: transparent;
     color: var(--text-dim);
@@ -97,7 +172,7 @@ const CSS = `
     font: inherit;
     padding: 0;
   }
-  .cmd-chip button:hover {
+  .cmd-preview button:hover {
     color: var(--red);
   }
   .cmd-prompt {
@@ -107,7 +182,9 @@ const CSS = `
   .cmd-input {
     flex: 1;
     width: 100%;
-    height: 100%;
+    height: auto;
+    display: block;
+    box-sizing: border-box;
     background: transparent;
     border: none;
     outline: none;
@@ -121,6 +198,13 @@ const CSS = `
     margin: 0;
     min-height: 20px;
     overflow: auto;
+  }
+  .cmd-input-line {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
   }
   .cmd-input::placeholder {
     color: var(--text-dim);
@@ -144,39 +228,65 @@ export default function CommandInput({
   expanded = false,
   replyTarget = null,
   onClearReplyTarget,
-  onHeightChange
+  onHeightChange,
+  publishWarnings = []
 }) {
+  const isExpanded = expanded || Boolean(replyTarget)
   const [value, setValue] = useState('')
   const [history, setHistory] = useState([])
   const [historyIdx, setHistoryIdx] = useState(-1)
   const [attachedFiles, setAttachedFiles] = useState([])
+  const [previewItems, setPreviewItems] = useState([])
   const [isDragging, setIsDragging] = useState(false)
   const inputRef = useRef(null)
+  const fileInputRef = useRef(null)
   const wrapRef = useRef(null)
   const dragDepthRef = useRef(0)
 
   useEffect(() => {
     inputRef.current?.focus()
-  }, [replyTarget, expanded])
+  }, [replyTarget, isExpanded])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = wrapRef.current
     if (!el || !onHeightChange) return
 
     const report = () => {
-      onHeightChange(Math.ceil(el.getBoundingClientRect().height))
+      onHeightChange(Math.ceil(el.scrollHeight))
     }
 
-    report()
+    const frame = requestAnimationFrame(report)
 
     const observer = new ResizeObserver(report)
     observer.observe(el)
 
-    return () => observer.disconnect()
-  }, [onHeightChange, replyTarget, expanded, attachedFiles.length])
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [onHeightChange, replyTarget, isExpanded, attachedFiles.length])
+
+  useEffect(() => {
+    const nextPreviews = attachedFiles.map((file) => ({
+      file,
+      kind: file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : 'file',
+      previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : null
+    }))
+
+    setPreviewItems(nextPreviews)
+
+    return () => {
+      nextPreviews.forEach(item => {
+        if (item.previewUrl) {
+          URL.revokeObjectURL(item.previewUrl)
+        }
+      })
+    }
+  }, [attachedFiles])
 
   const addFiles = (incomingFiles) => {
-    setAttachedFiles(prev => dedupeFiles([...prev, ...incomingFiles]))
+    const accepted = incomingFiles.filter(file => file.type.startsWith('image/') || file.type.startsWith('video/'))
+    setAttachedFiles(prev => dedupeFiles([...prev, ...accepted]).slice(0, 3))
   }
 
   const clearFiles = () => {
@@ -253,6 +363,18 @@ export default function CommandInput({
     }
   }
 
+  const openPicker = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = (event) => {
+    const files = Array.from(event.target.files || [])
+    if (files.length > 0) {
+      addFiles(files)
+    }
+    event.target.value = ''
+  }
+
   return (
     <>
       <style>{CSS}</style>
@@ -266,7 +388,6 @@ export default function CommandInput({
         onDrop={handleDrop}
       >
         {isDragging ? <div className="cmd-drop-cover">drop to attach</div> : null}
-        <span className="cmd-prompt">{'>'}</span>
         <div className="cmd-input-stack">
           {replyTarget ? (
             <div className="cmd-reply">
@@ -279,46 +400,80 @@ export default function CommandInput({
               </button>
             </div>
           ) : null}
-          {attachedFiles.length > 0 ? (
-            <div className="cmd-attachments">
-              {attachedFiles.map((file, index) => (
-                <div className="cmd-chip" key={`${file.name}-${file.size}-${file.lastModified}-${index}`}>
-                  <span title={file.name}>{file.name}</span>
-                  <button type="button" onClick={() => removeFile(index)} aria-label={`Remove ${file.name}`}>
+          {previewItems.length > 0 ? (
+            <div className="cmd-previews">
+              {previewItems.map((item, index) => (
+                <div className="cmd-preview" key={`${item.file.name}-${item.file.size}-${item.file.lastModified}-${index}`}>
+                  {item.kind === 'image' && item.previewUrl ? (
+                    <img src={item.previewUrl} alt={item.file.name} />
+                  ) : (
+                    <div className="cmd-preview-video" aria-hidden="true">
+                      {item.kind === 'video' ? '▶' : '⇪'}
+                    </div>
+                  )}
+                  <div className="cmd-preview-meta">
+                    <strong title={item.file.name}>{item.file.name}</strong>
+                    <span>{Math.ceil(item.file.size / 1024)} KB</span>
+                  </div>
+                  <button type="button" onClick={() => removeFile(index)} aria-label={`Remove ${item.file.name}`}>
                     ×
                   </button>
                 </div>
               ))}
             </div>
           ) : null}
-          <textarea
-            ref={inputRef}
-            className="cmd-input"
-            value={value}
-            onChange={event => setValue(event.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              expanded
-                ? (replyTarget
-                  ? 'enter to send a reply, shift+enter for a newline'
-                  : attachedFiles.length > 0
-                    ? 'enter to send, shift+enter for a newline'
-                    : 'type a message, /help, or shift+enter for a newline')
-                : (attachedFiles.length > 0
-                  ? 'press enter to send with attachments'
-                  : 'type a message or /help')
-            }
-            rows={expanded ? 4 : 1}
-            autoComplete="off"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            style={{
-              minHeight: expanded ? '92px' : '20px',
-              maxHeight: expanded ? '160px' : '72px'
-            }}
-          />
+          {publishWarnings.length > 0 ? (
+            <div className="cmd-warnings" role="status" aria-live="polite">
+              {publishWarnings.map((warning) => (
+                <div className="cmd-warning" key={warning} title={warning}>
+                  media warning: {warning}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <div className="cmd-input-line">
+            <button type="button" className="cmd-media-btn" onClick={openPicker}>
+              [+]
+            </button>
+            <span className="cmd-prompt">{'>'}</span>
+            <textarea
+              ref={inputRef}
+              className="cmd-input"
+              value={value}
+              onChange={event => setValue(event.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                isExpanded
+                  ? (replyTarget
+                    ? 'enter to send a reply, shift+enter for a newline'
+                    : attachedFiles.length > 0
+                      ? 'enter to send, shift+enter for a newline'
+                      : 'type a message, /help, or shift+enter for a newline')
+                  : (attachedFiles.length > 0
+                    ? 'press enter to send with attachments'
+                    : 'type a message or /help')
+              }
+              rows={isExpanded ? 4 : 1}
+              autoComplete="off"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              style={{
+                minHeight: isExpanded ? '92px' : '20px',
+                maxHeight: isExpanded ? '160px' : '72px'
+              }}
+            />
+          </div>
         </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,video/*"
+          capture="environment"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleFileChange}
+        />
       </div>
     </>
   )

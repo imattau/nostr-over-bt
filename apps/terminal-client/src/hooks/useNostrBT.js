@@ -18,6 +18,9 @@ const TRANSPORT_SECRET_KEY = 'terminal_transport_nsec'
 const PROFILE_CACHE_KEY = 'terminal_profile_cache_v1'
 const FOLLOW_CACHE_PREFIX = 'terminal_follow_cache_v1'
 const BLOCK_CACHE_PREFIX = 'terminal_block_cache_v1'
+const HISTORY_BACKFILL_PAGE_SIZE = 50
+const HISTORY_BACKFILL_MAX_PAGES = 4
+const HISTORY_BACKFILL_TIMEOUT_MS = 2500
 
 function uniquePush(values, nextValue) {
   if (!nextValue) return values
@@ -42,6 +45,32 @@ function parseMagnetInfoHash(magnetUri) {
   if (!magnetUri) return null
   const match = magnetUri.match(/[?&]xt=urn:btih:([^&]+)/i)
   return match ? match[1] : null
+}
+
+function collectEventsWithTimeout(transport, filter, timeoutMs = HISTORY_BACKFILL_TIMEOUT_MS) {
+  return new Promise(resolve => {
+    const events = []
+    const seen = new Set()
+    let done = false
+    let sub
+
+    const finish = () => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      if (sub?.close) {
+        sub.close()
+      }
+      resolve(events)
+    }
+
+    const timer = setTimeout(finish, timeoutMs)
+    sub = transport.subscribe(filter, (event) => {
+      if (!event?.id || seen.has(event.id)) return
+      seen.add(event.id)
+      events.push(event)
+    })
+  })
 }
 
 function getReplyParentId(event) {
@@ -141,6 +170,7 @@ export function useNostrBT() {
   const [replyTarget, setReplyTarget] = useState(null)
   const [follows, setFollows] = useState(new Set())
   const [blockedPubkeys, setBlockedPubkeys] = useState(new Set())
+  const [publishWarnings, setPublishWarnings] = useState([])
   const [seeding, setSeeding] = useState([])
   const [authMode, setAuthMode] = useState(() => localStorage.getItem(AUTH_MODE_KEY))
   const [authError, setAuthError] = useState('')
@@ -182,6 +212,7 @@ export function useNostrBT() {
     setReplyTarget(null)
     setFollows(new Set())
     setBlockedPubkeys(new Set())
+    setPublishWarnings([])
     setSeeding([])
     setStatus('locked')
   }, [])
@@ -430,6 +461,68 @@ export function useNostrBT() {
         setStatus('online')
         logSwarmEvent('hybrid transport online', 'success')
         subscriptionRef.current = nostr.subscribe({ kinds: [1], limit: 50 }, onEvent)
+
+        void (async () => {
+          try {
+            if (!resolvedNostrPubkey || !isMounted.current) return
+
+            logSwarmEvent('backfilling your posts from relays...', 'info')
+            const seenIds = new Set()
+            let until = Math.floor(Date.now() / 1000) + 1
+            let loadedCount = 0
+
+            for (let page = 0; page < HISTORY_BACKFILL_MAX_PAGES; page += 1) {
+              if (!isMounted.current) return
+
+              const events = await collectEventsWithTimeout(
+                nostr,
+                {
+                  authors: [resolvedNostrPubkey],
+                  kinds: [1],
+                  limit: HISTORY_BACKFILL_PAGE_SIZE,
+                  until
+                }
+              )
+
+              const freshEvents = events
+                .filter(event => event && event.id && !seenIds.has(event.id))
+                .sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id))
+
+              if (freshEvents.length === 0) break
+
+              for (const event of freshEvents) {
+                seenIds.add(event.id)
+                loadedCount += 1
+                addOrUpdateMessage(
+                  event,
+                  'relay',
+                  null,
+                  profileDisplayName(
+                    profileManager.cache.get(event.pubkey),
+                    normalizePubkey(event.pubkey) || 'system'
+                  )
+                )
+                profileManager.fetchProfile(event.pubkey)
+              }
+
+              const oldest = freshEvents.reduce(
+                (minTs, event) => Math.min(minTs, event.created_at),
+                until
+              )
+
+              if (freshEvents.length < HISTORY_BACKFILL_PAGE_SIZE) break
+              until = Math.max(0, oldest - 1)
+            }
+
+            if (loadedCount > 0) {
+              logSwarmEvent(`loaded ${loadedCount} of your posts from relays`, 'success')
+            } else {
+              logSwarmEvent('no historical posts found on relays', 'warning')
+            }
+          } catch (err) {
+            logSwarmEvent(`post history backfill failed: ${err.message}`, 'warning')
+          }
+        })()
       } catch (err) {
         if (!isMounted.current) return
         setStatus('error')
@@ -586,6 +679,8 @@ export function useNostrBT() {
 
     if (!trimmed && mediaFiles.length === 0) return
 
+    setPublishWarnings([])
+
     if (trimmed.startsWith('/')) {
       setReplyTarget(null)
 
@@ -727,6 +822,14 @@ export function useNostrBT() {
         addSeeding(parseMagnetInfoHash(result.magnetUri))
         logSwarmEvent(`published ${signedEvent.id.slice(0, 12)}`, 'success')
       }
+      if (result?.eventSeedError) {
+        logSwarmEvent(`event seed warning: ${result.eventSeedError}`, 'warning')
+      }
+      if (result?.mediaErrors?.length > 0) {
+        const warnings = result.mediaErrors.map(item => `${item.filename}: ${item.error}`)
+        setPublishWarnings(warnings)
+        logSwarmEvent(`media seed warning: ${warnings[0]}`, 'warning')
+      }
     } catch (err) {
       logSwarmEvent(`publish failed: ${err.message}`, 'error')
     } finally {
@@ -796,6 +899,7 @@ export function useNostrBT() {
     blockedPubkeys,
     toggleBlockedPubkey,
     reportMessage,
+    publishWarnings,
     follows,
     seeding,
     publish,

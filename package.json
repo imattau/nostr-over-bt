@@ -15,7 +15,8 @@
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "lint": "eslint src/",
     "bench": "node examples/relay-server/benchmark.js",
-    "bench:realistic": "node examples/relay-server/realistic-benchmark.js"
+    "bench:realistic": "node examples/relay-server/realistic-benchmark.js",
+    "deploy:terminal-web": "bash scripts/deploy-terminal-web.sh"
   },
   "repository": {
     "type": "git",

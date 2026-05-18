@@ -62,10 +62,29 @@ const CSS = `
     color: var(--text);
     border-color: var(--blue);
   }
+  .statusbar .swarm-toggle {
+    display: none;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    font: inherit;
+    font-size: 11px;
+    padding: 2px 8px;
+    cursor: pointer;
+  }
+  .statusbar .swarm-toggle:hover {
+    color: var(--text);
+    border-color: var(--yellow);
+  }
   .statusbar .pubkey {
     color: var(--text);
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  @media (min-width: 600px) and (max-width: 767px) {
+    .statusbar .swarm-toggle {
+      display: inline-flex;
+    }
   }
 `
 
@@ -79,7 +98,16 @@ function formatPubkey(identity) {
   }
 }
 
-export default function StatusBar({ status, identity, stats, activeChannel, onLogout, onAccountSwitch }) {
+export default function StatusBar({
+  status,
+  identity,
+  stats,
+  activeChannel,
+  onLogout,
+  onAccountSwitch,
+  showSwarmToggle = false,
+  onToggleSwarm
+}) {
   const isOnline = status === 'online'
 
   return (
@@ -96,6 +124,11 @@ export default function StatusBar({ status, identity, stats, activeChannel, onLo
         {onAccountSwitch ? (
           <button type="button" className="account" onClick={onAccountSwitch}>
             account
+          </button>
+        ) : null}
+        {onToggleSwarm ? (
+          <button type="button" className="swarm-toggle" onClick={onToggleSwarm} aria-pressed={showSwarmToggle}>
+            {showSwarmToggle ? 'hide swarm' : 'swarm'}
           </button>
         ) : null}
         {onLogout ? (

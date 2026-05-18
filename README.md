@@ -31,6 +31,7 @@ npm install nostr-over-bt
 *   [API Reference](docs/API.md): Detailed documentation of all classes and methods.
 *   [P2P Discovery](docs/P2P_DISCOVERY.md): Deep dive into the DHT-based discovery protocol.
 *   [Development Guide](docs/DEVELOPMENT.md): Instructions for setting up and contributing to the project.
+*   [Deployment Guide](docs/DEPLOYMENT.md): Terminal web app deployment on a remote server.
 
 ## 🛠 Quick Start (Client)
 

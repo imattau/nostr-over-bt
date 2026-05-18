@@ -51,21 +51,32 @@ const CSS = `
     content: '· ';
   }
   .follow-item {
-    padding: 2px 12px;
+    padding: 4px 12px 5px;
     font-size: 11px;
     color: var(--text-dim);
-    white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
     cursor: pointer;
+    display: grid;
+    gap: 1px;
+    line-height: 1.2;
   }
   .follow-item:hover {
     background: var(--bg3);
     color: var(--text);
   }
+  .follow-item .follow-name,
   .follow-item .follow-pubkey {
     display: block;
-    margin-top: 1px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .follow-item .follow-name {
+    font-size: 11px;
+    color: var(--text);
+  }
+  .follow-item .follow-pubkey {
     font-size: 10px;
     color: var(--text-dim);
     opacity: 0.8;
@@ -75,9 +86,9 @@ const CSS = `
 function formatFollowKey(pubkey) {
   if (!pubkey) return '···'
   try {
-    return `${nip19.npubEncode(pubkey).slice(0, 12)}···`
+    return `${nip19.npubEncode(pubkey).slice(0, 10)}…`
   } catch {
-    return `${pubkey.slice(0, 12)}···`
+    return `${pubkey.slice(0, 10)}…`
   }
 }
 
@@ -129,7 +140,7 @@ export default function ChannelList({ activeChannel, setActiveChannel, peers, fo
                 }
               }}
             >
-              {follow.label}
+              <span className="follow-name">{follow.label}</span>
               <span className="follow-pubkey">{formatFollowKey(follow.pubkey)}</span>
             </div>
           ))

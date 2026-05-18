@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec bash "$0" "$@"
+fi
+
 set -euo pipefail
 
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
@@ -62,6 +66,32 @@ shell_quote() {
   printf '%q' "$1"
 }
 
+expand_path() {
+  local input="$1"
+
+  if [[ -z "$input" ]]; then
+    printf '%s' "$input"
+    return 0
+  fi
+
+  if [[ "$input" == "~" ]]; then
+    printf '%s' "${HOME:-$input}"
+    return 0
+  fi
+
+  if [[ "$input" == "~/"* ]]; then
+    printf '%s' "${HOME:-}${input:1}"
+    return 0
+  fi
+
+  if [[ "$input" == /* ]]; then
+    printf '%s' "$input"
+    return 0
+  fi
+
+  printf '%s/%s' "$PWD" "$input"
+}
+
 load_state() {
   if [[ -f "$STATE_FILE" ]]; then
     # shellcheck disable=SC1090
@@ -73,6 +103,9 @@ load_state() {
     [[ "${DEPLOY_DOMAIN:-}" ]] && DOMAIN="$DEPLOY_DOMAIN"
     [[ "${DEPLOY_PROXY_TYPE:-}" ]] && PROXY_TYPE="$DEPLOY_PROXY_TYPE"
   fi
+
+  INSTALL_DIR="$(expand_path "$INSTALL_DIR")"
+  WWW_DIR="$(expand_path "$WWW_DIR")"
 }
 
 save_state() {
@@ -145,10 +178,8 @@ choose_proxy() {
 }
 
 ensure_git_repo() {
-  install -d -m 0755 "$(dirname "$INSTALL_DIR")"
-
-  if [[ -d "$INSTALL_DIR/.git" ]]; then
-    log "Updating existing checkout in $INSTALL_DIR"
+  if git -C "$INSTALL_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    log "Using existing git checkout in $INSTALL_DIR"
     git -C "$INSTALL_DIR" fetch --all --prune
     git -C "$INSTALL_DIR" checkout "$BRANCH"
     git -C "$INSTALL_DIR" pull --ff-only origin "$BRANCH"
@@ -159,11 +190,15 @@ ensure_git_repo() {
     die "$INSTALL_DIR exists but is not a git checkout. Move it aside before deploying."
   fi
 
+  install -d -m 0755 "$(dirname "$INSTALL_DIR")"
   log "Cloning $REPO_URL into $INSTALL_DIR"
   git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$INSTALL_DIR"
 }
 
 install_dependencies_and_build() {
+  log "Installing repository dependencies"
+  (cd "$INSTALL_DIR" && npm ci)
+
   log "Installing terminal client dependencies"
   (cd "$INSTALL_DIR/$APP_DIR" && npm ci)
 
@@ -469,8 +504,11 @@ main() {
     prompt_default domain_input "Public web address (host only)" "${DOMAIN:-terminal.example.com}"
     DOMAIN="$(sanitize_domain "$domain_input")"
     choose_proxy
-    save_state
   fi
+
+  INSTALL_DIR="$(expand_path "$INSTALL_DIR")"
+  WWW_DIR="$(expand_path "$WWW_DIR")"
+  save_state
 
   if [[ -z "$REPO_URL" ]]; then
     die "Repository URL is required. Re-run with --reconfigure and provide a git URL."

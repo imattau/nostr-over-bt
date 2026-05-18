@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import * as nip19 from 'nostr-tools/nip19'
 import { useNostrBT } from './hooks/useNostrBT.js'
 import StatusBar from './components/StatusBar.jsx'
 import ChannelList from './components/ChannelList.jsx'
@@ -369,11 +370,55 @@ export default function App() {
   const activeMenuMessage = postMenu?.message || null
   const activeMenuBlocked = Boolean(activeMenuMessage?.pubkey && blockedPubkeys.has(activeMenuMessage.pubkey))
   const focusedMessage = focusedMessageId ? messages.find(message => message.id === focusedMessageId) || null : null
+  const followEntries = useMemo(() => {
+    const byPubkey = new Map()
+
+    for (const message of messages) {
+      if (!message?.pubkey || message.source === 'system') continue
+      if (!byPubkey.has(message.pubkey)) {
+        byPubkey.set(message.pubkey, message)
+      }
+    }
+
+    return Array.from(follows)
+      .filter(pubkey => pubkey && pubkey !== identity?.nostrPubkey)
+      .sort((a, b) => a.localeCompare(b))
+      .map(pubkey => {
+        const latest = byPubkey.get(pubkey)
+        const label = latest?.author || (() => {
+          try {
+            return nip19.npubEncode(pubkey).slice(0, 12)
+          } catch {
+            return pubkey.slice(0, 12)
+          }
+        })()
+
+        return {
+          pubkey,
+          label
+        }
+      })
+  }, [follows, identity?.nostrPubkey, messages])
 
   const handleFocusMessage = (message) => {
     if (!message || message.source === 'system') return
     setFocusedMessageId(message.id)
     setReplyTarget(message)
+  }
+
+  const handleOpenFollow = (pubkey) => {
+    if (!pubkey) return
+    setActiveChannel('follows')
+    setFocusedMessageId(null)
+    setReplyTarget(null)
+
+    const latestMessage = [...messages]
+      .reverse()
+      .find(message => message?.pubkey === pubkey && message.source !== 'system')
+
+    if (latestMessage) {
+      handleFocusMessage(latestMessage)
+    }
   }
 
   const handleResolveNostrLink = async (raw) => {
@@ -497,11 +542,13 @@ export default function App() {
           style={{ '--pane-index': paneIndex }}
         >
           <div className="channel-list">
-            <ChannelList
-              activeChannel={activeChannel}
-              setActiveChannel={setActiveChannel}
-              peers={peers}
-            />
+          <ChannelList
+            activeChannel={activeChannel}
+            setActiveChannel={setActiveChannel}
+            peers={peers}
+            follows={followEntries}
+            onOpenFollow={handleOpenFollow}
+          />
           </div>
           <div
             className="feed-shell"

@@ -1,3 +1,5 @@
+import * as nip19 from 'nostr-tools/nip19'
+
 const CHANNELS = ['global', 'nostr-bt', 'follows', 'myposts']
 
 const CSS = `
@@ -48,9 +50,38 @@ const CSS = `
   .peer-item::before {
     content: '· ';
   }
+  .follow-item {
+    padding: 2px 12px;
+    font-size: 11px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+  }
+  .follow-item:hover {
+    background: var(--bg3);
+    color: var(--text);
+  }
+  .follow-item .follow-pubkey {
+    display: block;
+    margin-top: 1px;
+    font-size: 10px;
+    color: var(--text-dim);
+    opacity: 0.8;
+  }
 `
 
-export default function ChannelList({ activeChannel, setActiveChannel, peers }) {
+function formatFollowKey(pubkey) {
+  if (!pubkey) return '···'
+  try {
+    return `${nip19.npubEncode(pubkey).slice(0, 12)}···`
+  } catch {
+    return `${pubkey.slice(0, 12)}···`
+  }
+}
+
+export default function ChannelList({ activeChannel, setActiveChannel, peers, follows, onOpenFollow }) {
   return (
     <>
       <style>{CSS}</style>
@@ -75,6 +106,31 @@ export default function ChannelList({ activeChannel, setActiveChannel, peers }) 
           peers.map(peer => (
             <div key={peer} className="peer-item" title={peer}>
               {peer.slice(0, 10)}
+            </div>
+          ))
+        )}
+
+        <div className="chanlist-section">follows</div>
+        {follows.length === 0 ? (
+          <div className="peer-item" style={{ fontStyle: 'italic' }}>none</div>
+        ) : (
+          follows.map(follow => (
+            <div
+              key={follow.pubkey}
+              className="follow-item"
+              title={follow.pubkey}
+              onClick={() => onOpenFollow?.(follow.pubkey)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  onOpenFollow?.(follow.pubkey)
+                }
+              }}
+            >
+              {follow.label}
+              <span className="follow-pubkey">{formatFollowKey(follow.pubkey)}</span>
             </div>
           ))
         )}

@@ -71,8 +71,7 @@ const CSS = `
     grid-template-areas:
       'status'
       'main';
-    height: 100vh;
-    height: 100dvh;
+    height: var(--app-height, 100vh);
     overflow: hidden;
   }
 
@@ -162,8 +161,6 @@ const CSS = `
         'status'
         'main'
         'mobile-nav';
-      height: 100vh;
-      height: 100dvh;
     }
 
     .main-stage {
@@ -223,6 +220,38 @@ export default function App() {
   const [activePane, setActivePane] = useState('feed')
   const [showSwarm, setShowSwarm] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement))
+
+  useEffect(() => {
+    const setViewportHeight = () => {
+      const height = Math.round(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight)
+      document.documentElement.style.setProperty('--app-height', `${height}px`)
+    }
+
+    setViewportHeight()
+    window.addEventListener('resize', setViewportHeight)
+    window.addEventListener('orientationchange', setViewportHeight)
+    window.visualViewport?.addEventListener('resize', setViewportHeight)
+
+    return () => {
+      window.removeEventListener('resize', setViewportHeight)
+      window.removeEventListener('orientationchange', setViewportHeight)
+      window.visualViewport?.removeEventListener('resize', setViewportHeight)
+    }
+  }, [])
+
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen()
+        return
+      }
+
+      await document.documentElement.requestFullscreen?.()
+    } catch {
+      // ignore fullscreen failures
+    }
+  }
+
   const {
     status,
     authMode,
@@ -251,7 +280,9 @@ export default function App() {
     connectWithNsec,
     connectWithExtension,
     logout
-  } = useNostrBT()
+  } = useNostrBT({
+    onToggleFullscreen: toggleFullscreen
+  })
 
   const { onTouchStart, onTouchEnd } = useSwipe({
     onSwipeLeft: () => {
@@ -408,19 +439,6 @@ export default function App() {
     if (!activeMenuMessage?.id) return
     await copyText(activeMenuMessage.id)
     closePostMenu()
-  }
-
-  const toggleFullscreen = async () => {
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen()
-        return
-      }
-
-      await document.documentElement.requestFullscreen?.()
-    } catch {
-      // ignore fullscreen failures
-    }
   }
 
   const handleOpenNjump = () => {

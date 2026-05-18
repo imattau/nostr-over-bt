@@ -7,6 +7,7 @@ export const Kinds = {
     Metadata: nostr.kinds?.Metadata ?? 0,
     TextNote: nostr.kinds?.ShortTextNote ?? 1,
     Contacts: nostr.kinds?.Contacts ?? 3,
+    RelayList: nostr.kinds?.RelayList ?? 10002,
     Application: nostr.kinds?.Application ?? 30078,
     LongForm: nostr.kinds?.LongFormArticle ?? 30023
 };

@@ -158,7 +158,8 @@ const CSS = `
       margin-left: auto;
     }
     .msg-magnet,
-    .msg-files {
+    .msg-files,
+    .msg-relays {
       padding-left: 12px;
     }
   }
@@ -189,6 +190,14 @@ const CSS = `
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+  }
+  .msg-relays {
+    padding: 0 12px 2px 170px;
+    font-size: 10px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .msg-file {
     border: 1px solid var(--border);
@@ -488,6 +497,12 @@ function MessageEntry({ message, onResolveNostrLink, onFocusMessage, onContextMe
           {message.files.map(file => (
             <span key={file} className="msg-file">└─ {file}</span>
           ))}
+        </div>
+      ) : null}
+      {message.relayList && message.relayList.length > 0 ? (
+        <div className="msg-relays" title={message.relayList.join(', ')}>
+          relays: {message.relayList.slice(0, 3).join(', ')}
+          {message.relayList.length > 3 ? ` +${message.relayList.length - 3}` : ''}
         </div>
       ) : null}
     </div>

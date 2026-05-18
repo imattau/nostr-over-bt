@@ -6,6 +6,7 @@ import {
   NostrTransport,
   BitTorrentTransport,
   ProfileManager,
+  RelayListManager,
   WoTManager,
   FeedManager
 } from 'nostr-over-bt'
@@ -228,7 +229,11 @@ function savePersistedBlockedPubkeys(nostrPubkey, pubkeys) {
   }
 }
 
-export function useNostrBT() {
+export function useNostrBT(options = {}) {
+  const {
+    onToggleFullscreen = null
+  } = options
+
   const [status, setStatus] = useState('initializing')
   const [messages, setMessages] = useState([])
   const [peers, setPeers] = useState([])
@@ -253,6 +258,7 @@ export function useNostrBT() {
 
   const managerRef = useRef(null)
   const hybridRef = useRef(null)
+  const relayListManagerRef = useRef(null)
   const subscriptionRef = useRef(null)
   const intervalRef = useRef(null)
   const signEventRef = useRef(async () => {
@@ -303,6 +309,8 @@ export function useNostrBT() {
     }
     subscriptionRef.current = null
 
+    relayListManagerRef.current = null
+
     if (hybridRef.current) {
       hybridRef.current.disconnect()
     }
@@ -341,7 +349,8 @@ export function useNostrBT() {
         source,
         ts: event.created_at,
         hasBT,
-        magnetUri: magnetUri || event.tags?.find(tag => tag[0] === 'bt')?.[1] || null
+        magnetUri: magnetUri || event.tags?.find(tag => tag[0] === 'bt')?.[1] || null,
+        relayList: relayListManagerRef.current?.getRelayList?.(event.pubkey) || []
       }
 
       const existingIndex = prev.findIndex(message => message.id === event.id)
@@ -427,6 +436,19 @@ export function useNostrBT() {
       return {
         ...message,
         author: displayName
+      }
+    }))
+  }, [])
+
+  const refreshRelayList = useCallback((pubkey, relays) => {
+    if (!pubkey) return
+    const relayList = Array.isArray(relays) ? relays : []
+
+    setMessages(prev => prev.map(message => {
+      if (message.pubkey !== pubkey || message.source === 'system') return message
+      return {
+        ...message,
+        relayList
       }
     }))
   }, [])
@@ -533,6 +555,10 @@ export function useNostrBT() {
         onProfile: refreshDisplayName,
         storageKey: PROFILE_CACHE_KEY
       })
+      const relayListManager = new RelayListManager(nostr, {
+        onRelayList: refreshRelayList
+      })
+      relayListManagerRef.current = relayListManager
       const hybrid = new HybridTransport(nostr, bt)
       hybridRef.current = hybrid
 
@@ -582,6 +608,7 @@ export function useNostrBT() {
           profileDisplayName(profileManager.cache.get(event.pubkey), normalizePubkey(event.pubkey) || 'system')
         )
         profileManager.fetchProfile(event.pubkey)
+        relayListManager.fetchRelayList(event.pubkey)
       }
 
       try {
@@ -632,6 +659,7 @@ export function useNostrBT() {
                   )
                 )
                 profileManager.fetchProfile(event.pubkey)
+                relayListManager.fetchRelayList(event.pubkey)
               }
 
               const oldest = freshEvents.reduce(
@@ -692,6 +720,7 @@ export function useNostrBT() {
     addSeeding,
     logSwarmEvent,
     refreshDisplayName,
+    refreshRelayList,
     resetSessionState,
     teardownSession
   ])
@@ -822,7 +851,7 @@ export function useNostrBT() {
       const arg = args.join(' ').trim()
 
       if (cmd === '/help') {
-        addSystemMessage('/follow <npub>\n/relay <add|list>\n/peers\n/clear\n/expand\n/shrink\n/help')
+        addSystemMessage('/follow <npub>\n/relay <add|list>\n/peers\n/clear\n/expand\n/shrink\n/fullscreen\n/help')
         return
       }
 
@@ -840,6 +869,16 @@ export function useNostrBT() {
       if (cmd === '/shrink') {
         setComposerExpanded(false)
         addSystemMessage('Composer collapsed.')
+        return
+      }
+
+      if (cmd === '/fullscreen') {
+        if (typeof onToggleFullscreen === 'function') {
+          await onToggleFullscreen()
+          addSystemMessage('Fullscreen toggled.')
+        } else {
+          addSystemMessage('Fullscreen is not available in this view.')
+        }
         return
       }
 
@@ -964,7 +1003,7 @@ export function useNostrBT() {
     } finally {
       setReplyTarget(null)
     }
-  }, [addSeeding, identity, logSwarmEvent, peers, replyTarget, status])
+  }, [addSeeding, identity, logSwarmEvent, onToggleFullscreen, peers, replyTarget, status])
 
   const toggleBlockedPubkey = useCallback((pubkey) => {
     if (!pubkey) return

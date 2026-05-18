@@ -470,6 +470,7 @@ $DOMAIN {
 EOF
 
   mv "$tmp_file" "$caddyfile"
+  chmod 0644 "$caddyfile"
   echo "$caddyfile"
 }
 
@@ -485,6 +486,7 @@ remove_managed_caddy_blocks() {
   ' "$caddyfile" > "$tmp_file"
 
   mv "$tmp_file" "$caddyfile"
+  chmod 0644 "$caddyfile"
 }
 
 ensure_caddy_dropin_import() {
@@ -510,6 +512,7 @@ import $dropin_glob
 EOF
 
   mv "$tmp_file" "$caddyfile"
+  chmod 0644 "$caddyfile"
 }
 
 write_caddy_dropin_config() {
@@ -531,6 +534,8 @@ $DOMAIN {
     file_server
 }
 EOF
+
+  chmod 0644 "$dropin_file"
 
   echo "$dropin_file"
 }

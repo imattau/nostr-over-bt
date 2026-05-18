@@ -554,7 +554,8 @@ verify_url_response() {
   local url="$1"
   local label="$2"
   local resolve_host="${3:-}"
-  local attempts=12
+  local attempts="${4:-12}"
+  local delay_seconds="${5:-2}"
   local attempt=1
   local curl_args=(
     --fail
@@ -574,7 +575,7 @@ verify_url_response() {
       log "Verified $label at $url"
       return 0
     fi
-    sleep 2
+    sleep "$delay_seconds"
     ((attempt++))
   done
 
@@ -608,7 +609,7 @@ verify_deployment() {
   case "$service_name" in
     caddy)
       verify_url_response "http://$DOMAIN/" "HTTP endpoint" "$DOMAIN:80:127.0.0.1"
-      verify_url_response "https://$DOMAIN/" "HTTPS endpoint" "$DOMAIN:443:127.0.0.1"
+      verify_url_response "https://$DOMAIN/" "HTTPS endpoint" "$DOMAIN:443:127.0.0.1" 36 5
       ;;
     nginx|apache)
       verify_url_response "http://$DOMAIN/" "HTTP endpoint" "$DOMAIN:80:127.0.0.1"

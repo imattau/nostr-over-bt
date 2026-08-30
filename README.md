@@ -56,6 +56,24 @@ const result = await manager.publish(event);
 
 Relay operators can use the library to become "Seeding Nodes," ensuring that all events passing through their relay are permanently archived in the BitTorrent network. See `examples/relay-server/server.js` for a full implementation.
 
+### Storage Backends
+
+The reference relay (`apps/relay`) stores events through a pluggable backend, selected by `apps/relay/src/store/index.js`:
+
+| Backend | Engine | When it's used |
+| :--- | :--- | :--- |
+| **sqlite** (default) | `better-sqlite3`, WAL mode, FTS5 search | Always available; the fallback when no other backend is selected or detected. |
+| **polypack** | [`@0xx0lostcause0xx0/polypack`](https://github.com/imattau/polypack) property graph, disk-backed via `BinaryStoreAdapter` | Auto-selected when the host app already has `@0xx0lostcause0xx0/polypack` installed (e.g. it's already using it for its own graph/vector storage), so the relay can share that store instead of adding SQLite. |
+
+Configure via environment variables (see `apps/relay/.env.example`):
+
+*   `STORAGE_BACKEND=sqlite` — force SQLite.
+*   `STORAGE_BACKEND=polypack` — force polypack; throws at startup if the package isn't installed.
+*   unset — auto-detect: uses polypack if installed, otherwise SQLite.
+*   `POLYPACK_EMBEDDING_MODULE` — *(polypack backend only)* path/specifier to a module whose default (or `embedding`) export is a polypack `EmbeddingProvider` (`{ dimensions?, embed(text) }`). Used for NIP-50 search ranking instead of polypack's built-in lexical hash embedding — point this at a real semantic model for better search relevance.
+
+`@0xx0lostcause0xx0/polypack` is an **optional peer dependency** of `apps/relay` — it's never installed automatically, so relay deployments that don't need it stay SQLite-only.
+
 ## 📊 Performance
 
 | Mode | Relay Bandwidth | Reach | Scalability |

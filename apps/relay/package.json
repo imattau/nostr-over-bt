@@ -16,5 +16,13 @@
     "nostr-over-bt": "file:../..",
     "nostr-tools": "^2.22.1",
     "ws": "^8.19.0"
+  },
+  "peerDependencies": {
+    "@0xx0lostcause0xx0/polypack": ">=2.4.0"
+  },
+  "peerDependenciesMeta": {
+    "@0xx0lostcause0xx0/polypack": {
+      "optional": true
+    }
   }
 }

@@ -12,7 +12,7 @@ import {
     IdentityManager 
 } from 'nostr-over-bt';
 
-import { RelayDatabase } from './Database.js';
+import { createStore } from './store/index.js';
 import { SeedingQueue } from './Queue.js';
 
 const PORT = process.env.PORT || 8080;
@@ -20,7 +20,7 @@ const DB_PATH = process.env.DB_PATH || './relay.db';
 const ENABLE_BT = process.env.ENABLE_BT !== 'false';
 const TRACKER_PORT = process.env.TRACKER_PORT || 8081;
 
-const db = new RelayDatabase(DB_PATH);
+const db = await createStore(DB_PATH);
 
 // --- Whitelist Setup ---
 const ALLOWED_PUBKEYS = new Set();
@@ -98,7 +98,7 @@ wss.on('connection', (ws) => {
                         return;
                     }
 
-                    const result = db.saveEvent(event);
+                    const result = await db.saveEvent(event);
                     ws.send(JSON.stringify(['OK', event.id, true, '']));
                     if (result.changes > 0) {
                         if (queue) queue.enqueue(event);
@@ -110,10 +110,10 @@ wss.on('connection', (ws) => {
                     const subId = payload[0];
                     const filters = payload.slice(1);
                     subscriptions.set(subId, filters);
-                    filters.forEach(f => {
-                        const results = db.queryEvents(f);
+                    for (const f of filters) {
+                        const results = await db.queryEvents(f);
                         results.forEach(e => ws.send(JSON.stringify(['EVENT', subId, e])));
-                    });
+                    }
                     ws.send(JSON.stringify(['EOSE', subId]));
                     break;
                 }
@@ -144,6 +144,7 @@ server.listen(PORT, () => {
 process.on('SIGINT', async () => {
     if (hybrid) await hybrid.disconnect();
     if (tracker) tracker.close();
+    if (db.close) await db.close();
     server.close();
     process.exit(0);
 });

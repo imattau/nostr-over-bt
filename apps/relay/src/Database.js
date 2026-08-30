@@ -163,4 +163,8 @@ export class RelayDatabase {
             };
         });
     }
+
+    close() {
+        this.db.close();
+    }
 }
